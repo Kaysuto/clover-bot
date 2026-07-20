@@ -57,12 +57,20 @@ npm run dev             # démarre en mode développement
 /config niveaux recompense niveau:5 role:@Actif
 ```
 
-## Production
+## Production (VPS + Docker)
 
 ```bash
-npm run build
-npm start        # node dist/index.js (pm2/systemd/nssm recommandé)
+# Sur le VPS
+git clone <repo> && cd clover-bot
+cp .env.example .env    # remplir DISCORD_TOKEN, DATABASE_URL (Neon)…
+
+docker compose up -d --build
+docker compose logs -f bot
 ```
+
+- `restart: unless-stopped` relance le conteneur automatiquement après un crash ou un redémarrage du VPS (tant que le démon Docker démarre au boot — actif par défaut sur la plupart des distributions).
+- Les migrations (`npm run db:migrate`) et le déploiement des slash commands (`npm run deploy`) continuent de s'exécuter **hors du conteneur** (en local ou en CI), directement contre la base Neon partagée — comme en développement.
+- Mise à jour : `git pull && docker compose up -d --build`.
 
 ## Notes
 
