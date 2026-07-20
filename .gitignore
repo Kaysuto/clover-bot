@@ -5,6 +5,7 @@ node_modules/
 dist/
 
 # Secrets — ne jamais committer
+AGENTS.md
 .env
 .env.*
 !.env.example
