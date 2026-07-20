@@ -1,0 +1,17 @@
+# Dépendances
+node_modules/
+
+# Build
+dist/
+
+# Secrets — ne jamais committer
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# OS / éditeurs
+.DS_Store
+Thumbs.db
