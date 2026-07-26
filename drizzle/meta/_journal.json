@@ -8,6 +8,13 @@
       "when": 1784573215262,
       "tag": "0000_swift_zarek",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785109420319,
+      "tag": "0001_lush_professor_monster",
+      "breakpoints": true
     }
   ]
 }

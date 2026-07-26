@@ -4,6 +4,7 @@ import { tickGiveaways } from "../modules/giveaways/manager";
 import { syncGuildInvites } from "../modules/invites/cache";
 import { tickVoiceXp } from "../modules/leveling/voice-xp";
 import { tickMcCounter } from "../modules/mc-counter/job";
+import { tickMemberCounter } from "../modules/member-counter/job";
 import { tickStatus } from "../modules/status/monitor";
 import { syncGuild } from "../modules/sync/manager";
 import { cleanupTempVoice } from "../modules/tempvoice/manager";
@@ -51,6 +52,12 @@ const ready: EventHandler<"clientReady"> = {
       name: "mc-counter",
       intervalMs: 6 * 60_000, // limite Discord : 2 renommages / 10 min / salon
       run: () => tickMcCounter(client),
+      runOnStart: true,
+    });
+    registerJob({
+      name: "member-counter",
+      intervalMs: 6 * 60_000, // même limite de renommage que le compteur joueurs
+      run: () => tickMemberCounter(client),
       runOnStart: true,
     });
     registerJob({

@@ -1,0 +1,2 @@
+ALTER TABLE "bot_guild_config" ADD COLUMN "member_counter_channel_id" text;--> statement-breakpoint
+ALTER TABLE "bot_guild_config" ADD COLUMN "member_counter_template" text DEFAULT '👥 Membres : {count}' NOT NULL;
