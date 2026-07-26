@@ -1,4 +1,5 @@
-import { Client, Collection, GatewayIntentBits } from "discord.js";
+import { ActivityType, Client, Collection, GatewayIntentBits } from "discord.js";
+import { env } from "./config";
 import type { Command, ComponentHandler } from "./types";
 
 export class CloverClient extends Client {
@@ -19,6 +20,17 @@ export class CloverClient extends Client {
         GatewayIntentBits.GuildInvites,
       ],
       partials: [],
+      // Déclaré ici (et non après la connexion) : discord.js le renvoie dans
+      // chaque IDENTIFY, donc le statut survit aux reconnexions gateway.
+      presence: {
+        status: "online",
+        activities: [
+          {
+            name: env.BOT_ACTIVITY_NAME,
+            type: ActivityType[env.BOT_ACTIVITY_TYPE],
+          },
+        ],
+      },
     });
   }
 }

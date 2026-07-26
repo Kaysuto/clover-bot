@@ -41,6 +41,12 @@ export const botGuildConfig = pgTable("bot_guild_config", {
     .notNull()
     .default("🎮 En ligne : {count}"),
 
+  // Compteur de membres Discord (hors bots)
+  memberCounterChannelId: text("member_counter_channel_id"),
+  memberCounterTemplate: text("member_counter_template")
+    .notNull()
+    .default("👥 Membres : {count}"),
+
   // Tickets
   ticketCategoryId: text("ticket_category_id"),
   ticketArchiveChannelId: text("ticket_archive_channel_id"),

@@ -21,6 +21,12 @@ const envSchema = z.object({
   MC_HOST: z.string().min(1).default("play.clovergames.fr"),
   MC_PORT: z.coerce.number().int().positive().default(25565),
 
+  // Statut affiché sous le nom du bot (« Joue à … »)
+  BOT_ACTIVITY_NAME: z.string().min(1).default("play.clovergames.fr"),
+  BOT_ACTIVITY_TYPE: z
+    .enum(["Playing", "Listening", "Watching", "Competing"])
+    .default("Playing"),
+
   RCON_HOST: optionalString,
   RCON_PORT: optionalPort,
   RCON_PASSWORD: optionalString,

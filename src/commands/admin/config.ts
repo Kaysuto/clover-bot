@@ -5,6 +5,7 @@ import {
   MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
+  type VoiceChannel,
 } from "discord.js";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../db";
@@ -12,6 +13,7 @@ import { getGuildConfig, updateGuildConfig } from "../../db/guild-config";
 import { botLevelRoles } from "../../db/schema";
 import { errorEmbed, successEmbed } from "../../lib/embeds";
 import { getMcStatus } from "../../lib/mc-status";
+import { countHumanMembers } from "../../modules/member-counter/job";
 import type { Command } from "../../types";
 
 async function reply(
@@ -21,6 +23,25 @@ async function reply(
   await interaction.reply({
     embeds: [successEmbed(message)],
     flags: MessageFlags.Ephemeral,
+  });
+}
+
+/** Salon vocal verrouillé servant d'affichage (personne ne peut s'y connecter). */
+async function createCounterChannel(
+  interaction: ChatInputCommandInteraction<"cached">,
+  name: string,
+  reason: string,
+): Promise<VoiceChannel> {
+  return interaction.guild.channels.create({
+    name: name.slice(0, 100),
+    type: ChannelType.GuildVoice,
+    reason,
+    permissionOverwrites: [
+      {
+        id: interaction.guild.roles.everyone.id,
+        deny: [PermissionFlagsBits.Connect],
+      },
+    ],
   });
 }
 
@@ -138,16 +159,16 @@ const config: Command = {
     .addSubcommandGroup((g) =>
       g
         .setName("compteur")
-        .setDescription("Salon vocal compteur de joueurs Minecraft")
+        .setDescription("Salons vocaux compteurs (joueurs Minecraft, membres Discord)")
         .addSubcommand((s) =>
           s
-            .setName("creer")
-            .setDescription("Créer le salon vocal compteur (verrouillé)"),
+            .setName("joueurs-creer")
+            .setDescription("Créer le salon compteur de joueurs Minecraft (verrouillé)"),
         )
         .addSubcommand((s) =>
           s
-            .setName("salon")
-            .setDescription("Utiliser un salon vocal existant comme compteur")
+            .setName("joueurs-salon")
+            .setDescription("Utiliser un salon vocal existant comme compteur de joueurs")
             .addChannelOption((o) =>
               o
                 .setName("salon")
@@ -158,10 +179,35 @@ const config: Command = {
         )
         .addSubcommand((s) =>
           s
-            .setName("modele")
-            .setDescription("Modèle du nom ({count}, {max})")
+            .setName("joueurs-modele")
+            .setDescription("Modèle du nom du compteur de joueurs ({count}, {max})")
             .addStringOption((o) =>
               o.setName("texte").setDescription("Ex. 🎮 En ligne : {count}").setRequired(true).setMaxLength(90),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("membres-creer")
+            .setDescription("Créer le salon compteur de membres Discord (verrouillé)"),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("membres-salon")
+            .setDescription("Utiliser un salon vocal existant comme compteur de membres")
+            .addChannelOption((o) =>
+              o
+                .setName("salon")
+                .setDescription("Salon vocal")
+                .setRequired(true)
+                .addChannelTypes(ChannelType.GuildVoice),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("membres-modele")
+            .setDescription("Modèle du nom du compteur de membres ({count})")
+            .addStringOption((o) =>
+              o.setName("texte").setDescription("Ex. 👥 Membres : {count}").setRequired(true).setMaxLength(90),
             ),
         ),
     )
@@ -396,8 +442,8 @@ const config: Command = {
         return;
       }
 
-      // ── Compteur ──
-      case "compteur/creer": {
+      // ── Compteurs ──
+      case "compteur/joueurs-creer": {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const cfg = await getGuildConfig(guildId);
         const status = await getMcStatus();
@@ -406,38 +452,64 @@ const config: Command = {
               .replaceAll("{count}", String(status.players))
               .replaceAll("{max}", String(status.maxPlayers))
           : "🔴 Serveur hors ligne";
-        const channel = await interaction.guild.channels.create({
-          name: name.slice(0, 100),
-          type: ChannelType.GuildVoice,
-          reason: "Salon compteur de joueurs Minecraft",
-          permissionOverwrites: [
-            {
-              id: interaction.guild.roles.everyone.id,
-              deny: [PermissionFlagsBits.Connect],
-            },
-          ],
-        });
+        const channel = await createCounterChannel(
+          interaction,
+          name,
+          "Salon compteur de joueurs Minecraft",
+        );
         await updateGuildConfig(guildId, { counterChannelId: channel.id });
         await interaction.editReply({
           embeds: [
             successEmbed(
-              `Salon compteur créé : ${channel} (actualisé toutes les 6 min).`,
+              `Compteur de joueurs créé : ${channel} (actualisé toutes les 6 min).`,
             ),
           ],
         });
         return;
       }
-      case "compteur/salon": {
+      case "compteur/joueurs-salon": {
         const channel = interaction.options.getChannel("salon", true);
         await updateGuildConfig(guildId, { counterChannelId: channel.id });
-        await reply(interaction, `Salon compteur : ${channel}.`);
+        await reply(interaction, `Compteur de joueurs : ${channel}.`);
         return;
       }
-      case "compteur/modele": {
+      case "compteur/joueurs-modele": {
         await updateGuildConfig(guildId, {
           counterTemplate: interaction.options.getString("texte", true),
         });
-        await reply(interaction, "Modèle du compteur mis à jour.");
+        await reply(interaction, "Modèle du compteur de joueurs mis à jour.");
+        return;
+      }
+      case "compteur/membres-creer": {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const cfg = await getGuildConfig(guildId);
+        const count = await countHumanMembers(interaction.guild);
+        const channel = await createCounterChannel(
+          interaction,
+          cfg.memberCounterTemplate.replaceAll("{count}", String(count)),
+          "Salon compteur de membres Discord",
+        );
+        await updateGuildConfig(guildId, { memberCounterChannelId: channel.id });
+        await interaction.editReply({
+          embeds: [
+            successEmbed(
+              `Compteur de membres créé : ${channel} — **${count}** membre(s), bots exclus (actualisé toutes les 6 min).`,
+            ),
+          ],
+        });
+        return;
+      }
+      case "compteur/membres-salon": {
+        const channel = interaction.options.getChannel("salon", true);
+        await updateGuildConfig(guildId, { memberCounterChannelId: channel.id });
+        await reply(interaction, `Compteur de membres : ${channel}.`);
+        return;
+      }
+      case "compteur/membres-modele": {
+        await updateGuildConfig(guildId, {
+          memberCounterTemplate: interaction.options.getString("texte", true),
+        });
+        await reply(interaction, "Modèle du compteur de membres mis à jour.");
         return;
       }
 

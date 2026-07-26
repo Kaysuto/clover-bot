@@ -10,7 +10,8 @@ Bot Discord officiel du réseau **Clover Games** (`clovergames.fr` · `play.clov
 | 🎉 Concours | `/giveaway start\|end\|reroll\|list` | Participation par bouton, conditions (rôle, niveau min), reprise après redémarrage |
 | 🔗 Invitations | `/invites voir\|classement` | Relié aux invitations natives Discord — les invitations déjà réalisées sont comptées au premier démarrage |
 | 🔄 Synchro Minecraft | `/sync moi\|membre\|tout` | Pseudo Discord = pseudo Minecraft + rôle « Synchronisé », via la liaison de comptes du site |
-| 🎮 Compteur de joueurs | `/config compteur creer` | Salon vocal affichant le nombre de joueurs en ligne (actualisé toutes les 6 min) |
+| 🎮 Compteur de joueurs | `/config compteur joueurs-creer` | Salon vocal affichant le nombre de joueurs Minecraft en ligne (actualisé toutes les 6 min) |
+| 👥 Compteur de membres | `/config compteur membres-creer` | Salon vocal affichant le nombre de membres du Discord, **bots exclus** |
 | 🔊 Vocaux temporaires | `/voc …` | Rejoins « ➕ Créer ton vocal » → vocal + salon texte privé, verrouillage, limite, transfert… |
 | 📊 Statut des services | `/statut` | Embed auto-actualisé (site web, serveur Minecraft, RCON) + alerte webhook en cas de panne |
 | 🎫 Tickets | `/ticket setup\|add\|remove\|close` | Panneau à boutons, salons privés, transcript HTML archivé à la fermeture |
@@ -51,7 +52,8 @@ npm run dev             # démarre en mode développement
 /config tickets role-support role:@Support
 /ticket setup salon:#support
 /config tempvoice creer
-/config compteur creer
+/config compteur joueurs-creer
+/config compteur membres-creer
 /config statut salon:#statut
 /config niveaux salon-annonces salon:#niveaux
 /config niveaux recompense niveau:5 role:@Actif
@@ -75,6 +77,7 @@ docker compose logs -f bot
 ## Notes
 
 - **Invitations** : l'API Discord ne permet pas de savoir rétroactivement *qui* a invité *qui* avant l'installation du bot — les totaux existants sont repris comme « historiques », le journal nominatif commence à l'installation.
-- **Renommages** : Discord limite à 2 renommages / 10 min / salon (compteur de joueurs et `/voc renommer`).
+- **Renommages** : Discord limite à 2 renommages / 10 min / salon — d'où l'actualisation des compteurs toutes les 6 min (et la même limite sur `/voc renommer`).
+- **Statut du bot** : « Joue à play.clovergames.fr », réglable via `BOT_ACTIVITY_NAME` / `BOT_ACTIVITY_TYPE` dans `.env`. Déclaré à la connexion, donc conservé après une reconnexion gateway.
 - Le bot ne peut pas renommer le **propriétaire du serveur** (limite Discord).
 - **Phase 2 prévue** : liaison par code in-game (`/link` en jeu → `/lier` sur Discord) — nécessite le module `discordlink` dans le plugin clover-core.
