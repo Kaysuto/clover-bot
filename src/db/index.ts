@@ -10,9 +10,9 @@ export const pool = new Pool({
   max: 5,
 });
 
-// Neon suspend le compute après inactivité : la connexion peut être coupée
-// côté serveur. Le Pool en rouvrira une à la prochaine requête — il ne faut
-// simplement pas crasher sur l'événement error.
+// PgBouncer peut fermer une connexion inactive, et un redémarrage du conteneur
+// coupe toutes celles en cours. Le Pool en rouvrira une à la prochaine requête —
+// il ne faut simplement pas crasher sur l'événement error.
 pool.on("error", (err) => {
   logger.warn({ err }, "Connexion PostgreSQL perdue (reprise automatique)");
 });

@@ -37,7 +37,7 @@ https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot+application
 ```bash
 cp .env.example .env    # puis remplir DISCORD_TOKEN, DISCORD_GUILD_ID, DATABASE_URL…
 npm install
-npm run db:migrate      # crée les tables bot_* sur Neon
+npm run db:migrate      # crée les tables bot_* sur Supabase
 npm run deploy          # publie les slash commands sur la guilde
 npm run dev             # démarre en mode développement
 ```
@@ -62,14 +62,14 @@ npm run dev             # démarre en mode développement
 ```bash
 # Sur le VPS
 git clone <repo> && cd clover-bot
-cp .env.example .env    # remplir DISCORD_TOKEN, DATABASE_URL (Neon)…
+cp .env.example .env    # remplir DISCORD_TOKEN, DATABASE_URL (Supabase)…
 
 docker compose up -d --build
 docker compose logs -f bot
 ```
 
 - `restart: unless-stopped` relance le conteneur automatiquement après un crash ou un redémarrage du VPS (tant que le démon Docker démarre au boot — actif par défaut sur la plupart des distributions).
-- Les migrations (`npm run db:migrate`) et le déploiement des slash commands (`npm run deploy`) continuent de s'exécuter **hors du conteneur** (en local ou en CI), directement contre la base Neon partagée — comme en développement.
+- Les migrations (`npm run db:migrate`) et le déploiement des slash commands (`npm run deploy`) continuent de s'exécuter **hors du conteneur** (en local ou en CI), directement contre la base Supabase partagée — comme en développement. `DATABASE_URL` pointe sur `postgres_session` : le mode transaction de PgBouncer supporte mal le DDL.
 - Mise à jour : `git pull && docker compose up -d --build`.
 
 ## Notes
