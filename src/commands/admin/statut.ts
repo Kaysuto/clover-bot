@@ -13,7 +13,7 @@ const statut: Command = {
     .setContexts(InteractionContextType.Guild),
   async execute(interaction) {
     await interaction.reply({
-      embeds: [buildStatusEmbed()],
+      embeds: [buildStatusEmbed(interaction.client)],
       flags: MessageFlags.Ephemeral,
     });
   },
