@@ -1,0 +1,1 @@
+ALTER TABLE "bot_guild_config" DROP COLUMN "levelup_channel_id";

@@ -17,8 +17,7 @@ import {
 export const botGuildConfig = pgTable("bot_guild_config", {
   guildId: text("guild_id").primaryKey(),
 
-  // Niveaux
-  levelupChannelId: text("levelup_channel_id"), // null = annoncer dans le salon du message
+  // Niveaux (les passages de niveau sont annoncés en message privé)
   levelupMessage: text("levelup_message")
     .notNull()
     .default("🎉 {user} passe au niveau **{level}** !"),
@@ -97,6 +96,23 @@ export const botLevelRoles = pgTable(
     roleId: text("role_id").notNull(),
   },
   (t) => [uniqueIndex("bot_level_roles_guild_level_idx").on(t.guildId, t.level)],
+);
+
+// ─── Logs ────────────────────────────────────────────────────────────────────
+
+/**
+ * Réglage d'une catégorie de logs. Ligne absente = catégorie active, publiée
+ * dans le salon par défaut (`bot_guild_config.log_channel_id`).
+ */
+export const botLogSettings = pgTable(
+  "bot_log_settings",
+  {
+    guildId: text("guild_id").notNull(),
+    category: text("category").notNull(), // membres | moderation | vocal | serveur
+    channelId: text("channel_id"), // null = salon de logs par défaut
+    enabled: boolean("enabled").notNull().default(true),
+  },
+  (t) => [primaryKey({ columns: [t.guildId, t.category] })],
 );
 
 // ─── Giveaways ───────────────────────────────────────────────────────────────

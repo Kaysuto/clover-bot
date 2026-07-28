@@ -18,6 +18,8 @@ export class CloverClient extends Client {
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.GuildVoiceStates,
         GatewayIntentBits.GuildInvites,
+        // Bannissements/débannissements pour les logs (intent non privilégié).
+        GatewayIntentBits.GuildModeration,
       ],
       partials: [],
       // Déclaré ici (et non après la connexion) : discord.js le renvoie dans

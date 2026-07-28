@@ -6,7 +6,7 @@ Bot Discord officiel du réseau **Clover Games** (`clovergames.fr` · `play.clov
 
 | Fonctionnalité | Commandes | Détail |
 |---|---|---|
-| 📈 Niveaux | `/rank`, `/classement` | XP par message (anti-spam 60 s) + XP vocal, annonces de niveau, rôles récompense |
+| 📈 Niveaux | `/rank`, `/classement` | XP par message (anti-spam 60 s) + XP vocal, annonces de niveau **en message privé**, rôles récompense (un MP par grade obtenu) |
 | 🎉 Concours | `/giveaway start\|end\|reroll\|list` | Participation par bouton, conditions (rôle, niveau min), reprise après redémarrage |
 | 🔗 Invitations | `/invites voir\|classement` | Relié aux invitations natives Discord — les invitations déjà réalisées sont comptées au premier démarrage |
 | 🔄 Synchro Minecraft | `/sync moi\|membre\|tout` | Pseudo Discord = pseudo Minecraft + rôle « Synchronisé », via la liaison de comptes du site |
@@ -15,6 +15,7 @@ Bot Discord officiel du réseau **Clover Games** (`clovergames.fr` · `play.clov
 | 🔊 Vocaux temporaires | `/voc …` | Rejoins « ➕ Créer ton vocal » → vocal + salon texte privé, verrouillage, limite, transfert… |
 | 📊 Statut des services | `/statut` | Embed auto-actualisé (site web, serveur Minecraft, RCON) + alerte webhook en cas de panne |
 | 🎫 Tickets | `/ticket setup\|add\|remove\|close` | Panneau à boutons, salons privés, transcript HTML archivé à la fermeture |
+| 📋 Logs | `/config logs salon\|categorie\|voir` | Arrivées/départs, profils, modération, vocal, salons & rôles — 4 catégories activables, salon dédié possible par catégorie |
 | ⚙️ Configuration | `/config …` | Tout se configure en slash commands (admin) |
 
 ## Installation
@@ -28,8 +29,10 @@ Bot Discord officiel du réseau **Clover Games** (`clovergames.fr` · `play.clov
 5. Inviter le bot :
 
 ```
-https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot+applications.commands&permissions=420867184
+https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot+applications.commands&permissions=420867312
 ```
+
+> ℹ️ Par rapport à l'invitation d'origine, ce lien ajoute **Voir les logs d'audit** : c'est ce qui permet aux logs d'indiquer *qui* a expulsé, banni ou supprimé un salon. Sans cette permission le bot journalise quand même l'événement, mais sans son auteur.
 
 > ⚠️ Placer le rôle du bot **au-dessus** des rôles qu'il gère (« Synchronisé », rôles récompense) dans les paramètres du serveur.
 
@@ -55,7 +58,7 @@ npm run dev             # démarre en mode développement
 /config compteur joueurs-creer
 /config compteur membres-creer
 /config statut salon:#statut
-/config niveaux salon-annonces salon:#niveaux
+/config logs salon salon:#logs
 /config niveaux recompense niveau:5 role:@Actif
 ```
 
@@ -77,6 +80,8 @@ docker compose logs -f bot
 ## Notes
 
 - **Invitations** : l'API Discord ne permet pas de savoir rétroactivement *qui* a invité *qui* avant l'installation du bot — les totaux existants sont repris comme « historiques », le journal nominatif commence à l'installation.
+- **Logs** : quatre catégories — **Membres** (arrivées avec âge du compte et invitation utilisée, départs, pseudos, rôles, boosts, photo de profil et nom d'utilisateur), **Modération** (expulsions, bannissements, exclusions temporaires), **Vocal** (connexions, déconnexions, déplacements), **Serveur** (salons, rôles, invitations). Tout part dans le salon par défaut ; `/config logs salon salon:#x categorie:vocal` dédie un salon à une catégorie et `/config logs categorie categorie:vocal actif:false` la coupe. Les vocaux temporaires sont exclus des logs de salons (sinon le journal serait noyé). **Pas de log de messages supprimés/édités** : cela demanderait l'intent *Message Content*, volontairement désactivé.
+- **Niveaux** : les passages de niveau sont annoncés **en message privé** (jamais dans un salon), suivis d'un MP par grade débloqué. Si le membre a fermé ses MP, l'annonce est simplement ignorée — les rôles récompense sont attribués dans tous les cas. Modèle personnalisable : `/config niveaux message` (`{user}`, `{level}`, `{server}`).
 - **Renommages** : Discord limite à 2 renommages / 10 min / salon — d'où l'actualisation des compteurs toutes les 6 min (et la même limite sur `/voc renommer`).
 - **Statut du bot** : « Joue à play.clovergames.fr », réglable via `BOT_ACTIVITY_NAME` / `BOT_ACTIVITY_TYPE` dans `.env`. Déclaré à la connexion, donc conservé après une reconnexion gateway.
 - Le bot ne peut pas renommer le **propriétaire du serveur** (limite Discord).

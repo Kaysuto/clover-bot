@@ -3,6 +3,13 @@ services:
     build: .
     container_name: clover-bot
     restart: unless-stopped
+    # Le proxy Minecraft (play.clovergames.fr) tourne sur ce même VPS : en
+    # réseau bridge, Docker ne peut pas "rebondir" vers l'IP publique de son
+    # propre hôte (hairpin NAT), donc le ping SLP échoue et le statut affiché
+    # est "hors ligne". En network_mode: host, le conteneur partage la pile
+    # réseau de l'hôte, comme un process natif. Sans risque ici : le bot
+    # n'expose aucun port. (Linux uniquement — inutile en dev sous Docker Desktop.)
+    network_mode: host
     env_file:
       - .env
     environment:
