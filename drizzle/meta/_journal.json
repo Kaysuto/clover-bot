@@ -15,6 +15,20 @@
       "when": 1785109420319,
       "tag": "0001_lush_professor_monster",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785265311410,
+      "tag": "0002_burly_human_torch",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785265915737,
+      "tag": "0003_long_molly_hayes",
+      "breakpoints": true
     }
   ]
 }

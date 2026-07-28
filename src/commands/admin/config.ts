@@ -11,10 +11,23 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../../db";
 import { getGuildConfig, updateGuildConfig } from "../../db/guild-config";
 import { botLevelRoles } from "../../db/schema";
-import { errorEmbed, successEmbed } from "../../lib/embeds";
+import { brandEmbed, errorEmbed, successEmbed } from "../../lib/embeds";
 import { getMcStatus } from "../../lib/mc-status";
+import {
+  getLogSettings,
+  LOG_CATEGORIES,
+  LOG_CATEGORY_KEYS,
+  type LogCategory,
+  setLogSetting,
+} from "../../modules/logs/channel";
 import { countHumanMembers } from "../../modules/member-counter/job";
 import type { Command } from "../../types";
+
+/** Choix proposés dans les options `categorie` du groupe `logs`. */
+const LOG_CATEGORY_CHOICES = LOG_CATEGORY_KEYS.map((key) => ({
+  name: LOG_CATEGORIES[key],
+  value: key,
+}));
 
 async function reply(
   interaction: ChatInputCommandInteraction<"cached">,
@@ -58,19 +71,8 @@ const config: Command = {
         .setDescription("Configuration du système de niveaux")
         .addSubcommand((s) =>
           s
-            .setName("salon-annonces")
-            .setDescription("Salon des annonces de niveau (vide = salon du message)")
-            .addChannelOption((o) =>
-              o
-                .setName("salon")
-                .setDescription("Salon d'annonces")
-                .addChannelTypes(ChannelType.GuildText),
-            ),
-        )
-        .addSubcommand((s) =>
-          s
             .setName("message")
-            .setDescription("Message de passage de niveau ({user}, {level})")
+            .setDescription("Message privé de passage de niveau ({user}, {level}, {server})")
             .addStringOption((o) =>
               o.setName("texte").setDescription("Modèle du message").setRequired(true).setMaxLength(500),
             ),
@@ -306,18 +308,42 @@ const config: Command = {
     .addSubcommandGroup((g) =>
       g
         .setName("logs")
-        .setDescription("Salon des logs du bot")
+        .setDescription("Journal des événements du serveur")
         .addSubcommand((s) =>
           s
             .setName("salon")
-            .setDescription("Définir le salon de logs")
+            .setDescription("Salon de logs (par défaut, ou dédié à une catégorie)")
             .addChannelOption((o) =>
               o
                 .setName("salon")
                 .setDescription("Salon de logs")
                 .setRequired(true)
                 .addChannelTypes(ChannelType.GuildText),
+            )
+            .addStringOption((o) =>
+              o
+                .setName("categorie")
+                .setDescription("Limiter ce salon à une catégorie (sinon : salon par défaut)")
+                .addChoices(...LOG_CATEGORY_CHOICES),
             ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("categorie")
+            .setDescription("Activer ou désactiver une catégorie de logs")
+            .addStringOption((o) =>
+              o
+                .setName("categorie")
+                .setDescription("Catégorie concernée")
+                .setRequired(true)
+                .addChoices(...LOG_CATEGORY_CHOICES),
+            )
+            .addBooleanOption((o) =>
+              o.setName("actif").setDescription("Journaliser cette catégorie").setRequired(true),
+            ),
+        )
+        .addSubcommand((s) =>
+          s.setName("voir").setDescription("Afficher la configuration des logs"),
         ),
     ),
   async execute(interaction) {
@@ -327,17 +353,6 @@ const config: Command = {
 
     switch (`${group}/${sub}`) {
       // ── Niveaux ──
-      case "niveaux/salon-annonces": {
-        const channel = interaction.options.getChannel("salon");
-        await updateGuildConfig(guildId, { levelupChannelId: channel?.id ?? null });
-        await reply(
-          interaction,
-          channel
-            ? `Annonces de niveau dans ${channel}.`
-            : "Annonces de niveau dans le salon du message.",
-        );
-        return;
-      }
       case "niveaux/message": {
         await updateGuildConfig(guildId, {
           levelupMessage: interaction.options.getString("texte", true),
@@ -593,8 +608,63 @@ const config: Command = {
       // ── Logs ──
       case "logs/salon": {
         const channel = interaction.options.getChannel("salon", true);
+        const category = interaction.options.getString("categorie") as LogCategory | null;
+        if (category) {
+          await setLogSetting(guildId, category, {
+            channelId: channel.id,
+            enabled: true,
+          });
+          await reply(
+            interaction,
+            `Logs **${LOG_CATEGORIES[category]}** dans ${channel}.`,
+          );
+          return;
+        }
         await updateGuildConfig(guildId, { logChannelId: channel.id });
-        await reply(interaction, `Salon de logs : ${channel}.`);
+        await reply(
+          interaction,
+          `Salon de logs par défaut : ${channel} — utilisé par toutes les catégories sans salon dédié.`,
+        );
+        return;
+      }
+      case "logs/categorie": {
+        const category = interaction.options.getString("categorie", true) as LogCategory;
+        const actif = interaction.options.getBoolean("actif", true);
+        await setLogSetting(guildId, category, { enabled: actif });
+        await reply(
+          interaction,
+          `Logs **${LOG_CATEGORIES[category]}** ${actif ? "activés" : "désactivés"}.`,
+        );
+        return;
+      }
+      case "logs/voir": {
+        const cfg = await getGuildConfig(guildId);
+        const settings = await getLogSettings(guildId);
+        const lines = LOG_CATEGORY_KEYS.map((key) => {
+          const setting = settings.find((s) => s.category === key);
+          if (setting && !setting.enabled) {
+            return `❌ **${LOG_CATEGORIES[key]}** — désactivé`;
+          }
+          const channelId = setting?.channelId ?? cfg.logChannelId;
+          return `✅ **${LOG_CATEGORIES[key]}** — ${
+            channelId ? `<#${channelId}>` : "*aucun salon configuré*"
+          }`;
+        });
+        await interaction.reply({
+          embeds: [
+            brandEmbed()
+              .setTitle("📋 Configuration des logs")
+              .setDescription(
+                `**Salon par défaut** ${
+                  cfg.logChannelId ? `<#${cfg.logChannelId}>` : "*non défini*"
+                }\n\n${lines.join("\n")}`,
+              )
+              .setFooter({
+                text: "L'auteur des sanctions et suppressions nécessite la permission « Voir les logs d'audit ».",
+              }),
+          ],
+          flags: MessageFlags.Ephemeral,
+        });
         return;
       }
     }

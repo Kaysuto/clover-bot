@@ -1,8 +1,9 @@
-import type { Guild, Message, SendableChannels } from "discord.js";
+import type { Guild, GuildMember, Message } from "discord.js";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { getGuildConfig, type GuildConfig } from "../../db/guild-config";
 import { botLevels } from "../../db/schema";
+import { brandEmbed } from "../../lib/embeds";
 import { logger } from "../../lib/logger";
 import { levelFromXp } from "./formula";
 import { applyLevelRoles } from "./rewards";
@@ -30,7 +31,6 @@ export async function handleMessageXp(message: Message): Promise<void> {
   await grantXp(message.guild, message.author.id, gain, {
     cfg,
     fromMessage: true,
-    fallbackChannel: message.channel,
   });
 }
 
@@ -38,11 +38,13 @@ interface GrantXpOptions {
   cfg: GuildConfig;
   fromMessage?: boolean;
   fromVoiceMinute?: boolean;
-  /** Salon d'annonce si aucun salon dédié n'est configuré. */
-  fallbackChannel?: SendableChannels | null;
 }
 
-/** Crédite de l'XP et gère le passage de niveau (annonce + rôles). */
+/**
+ * Crédite de l'XP et gère le passage de niveau : annonce en message privé
+ * (jamais dans un salon du serveur) puis rôles récompense, avec un message
+ * privé supplémentaire pour chaque grade obtenu.
+ */
 export async function grantXp(
   guild: Guild,
   userId: string,
@@ -84,29 +86,38 @@ export async function grantXp(
     .set({ level: newLevel })
     .where(and(eq(botLevels.guildId, guild.id), eq(botLevels.userId, userId)));
 
-  // Annonce du passage de niveau
-  const announceChannel = resolveAnnounceChannel(guild, opts);
-  if (announceChannel) {
-    const content = opts.cfg.levelupMessage
-      .replaceAll("{user}", `<@${userId}>`)
-      .replaceAll("{level}", String(newLevel));
-    await announceChannel
-      .send({ content, allowedMentions: { users: [userId] } })
-      .catch((err) => logger.warn({ err }, "Annonce de niveau impossible"));
-  }
-
-  // Rôles récompense
   const member = await guild.members.fetch(userId).catch(() => null);
-  if (member) await applyLevelRoles(member, newLevel);
+  if (!member) return;
+
+  // Annonce du passage de niveau, en privé
+  const content = opts.cfg.levelupMessage
+    .replaceAll("{user}", `<@${userId}>`)
+    .replaceAll("{level}", String(newLevel))
+    .replaceAll("{server}", guild.name);
+  await sendDm(member, content);
+
+  // Rôles récompense : un message privé par grade obtenu
+  for (const { role, level } of await applyLevelRoles(member, newLevel)) {
+    await sendDm(
+      member,
+      `🏅 Nouveau grade débloqué : **${role.name}** (niveau **${level}**) !`,
+    );
+  }
 }
 
-function resolveAnnounceChannel(
-  guild: Guild,
-  opts: GrantXpOptions,
-): SendableChannels | null {
-  if (opts.cfg.levelupChannelId) {
-    const channel = guild.channels.cache.get(opts.cfg.levelupChannelId);
-    if (channel?.isSendable()) return channel;
-  }
-  return opts.fallbackChannel ?? null;
+/** Envoie un message privé signé du serveur ; échoue silencieusement si MP fermés. */
+async function sendDm(member: GuildMember, description: string): Promise<void> {
+  const embed = brandEmbed()
+    .setAuthor({
+      name: member.guild.name,
+      iconURL: member.guild.iconURL() ?? undefined,
+    })
+    .setDescription(description);
+
+  await member.send({ embeds: [embed] }).catch((err) => {
+    logger.debug(
+      { err, userId: member.id },
+      "Message privé de niveau impossible (MP fermés ?)",
+    );
+  });
 }
