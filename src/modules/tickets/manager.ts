@@ -7,6 +7,7 @@ import {
   MessageFlags,
   ModalBuilder,
   PermissionFlagsBits,
+  StringSelectMenuBuilder,
   type TextChannel,
   TextInputBuilder,
   TextInputStyle,
@@ -25,13 +26,35 @@ import type { ComponentHandler, ComponentInteraction } from "../../types";
 
 export type TicketRow = typeof botTickets.$inferSelect;
 
-export const TICKET_CATEGORIES: Record<string, { label: string; emoji: string }> =
-  {
-    support: { label: "Support", emoji: "🛠️" },
-    signalement: { label: "Signalement", emoji: "🚨" },
-    boutique: { label: "Boutique", emoji: "🛒" },
-    autre: { label: "Autre", emoji: "💬" },
-  };
+interface TicketCategory {
+  label: string;
+  emoji: string;
+  /** Description affichée sous l'option du menu déroulant (100 car. max). */
+  hint: string;
+}
+
+export const TICKET_CATEGORIES: Record<string, TicketCategory> = {
+  support: {
+    label: "Support",
+    emoji: "🛠️",
+    hint: "Bug, connexion impossible, question sur le serveur",
+  },
+  signalement: {
+    label: "Signalement",
+    emoji: "🚨",
+    hint: "Triche, comportement d'un joueur, litige",
+  },
+  boutique: {
+    label: "Boutique",
+    emoji: "🛒",
+    hint: "Achat, don, grade ou récompense non reçu",
+  },
+  autre: {
+    label: "Autre",
+    emoji: "💬",
+    hint: "Tout ce qui n'entre dans aucune autre case",
+  },
+};
 
 function ticketName(num: number): string {
   return `ticket-${String(num).padStart(4, "0")}`;
@@ -61,31 +84,46 @@ function isSupport(
 }
 
 /** Panneau publié par /ticket setup. */
-export function buildTicketPanel() {
+export function buildTicketPanel(client: CloverClient) {
   const embed = brandEmbed()
-    .setTitle("🎫 Besoin d'aide ?")
+    .setAuthor({
+      name: "Clover Games · Support",
+      iconURL: client.user?.displayAvatarURL({ size: 128 }),
+    })
+    .setTitle("🎫 Ouvrir un ticket")
     .setDescription(
       [
-        "Clique sur le bouton correspondant à ta demande pour ouvrir un ticket.",
-        "Un salon privé sera créé entre toi et l'équipe.",
+        "> Un salon privé sera créé entre toi et l'équipe.",
+        "> Tu y suis ta demande jusqu'à sa résolution.",
         "",
-        Object.entries(TICKET_CATEGORIES)
-          .map(([, v]) => `${v.emoji} **${v.label}**`)
-          .join(" · "),
+        "**Catégories disponibles**",
+        Object.values(TICKET_CATEGORIES)
+          .map((c) => `${c.emoji} ${c.label}`)
+          .join("  ·  "),
       ].join("\n"),
+    )
+    .setFooter({
+      text: "Un seul ticket ouvert à la fois • Ne partage jamais ton mot de passe",
+    });
+
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId(buildId("ticket", "open"))
+    .setPlaceholder("Choisis la catégorie de ta demande…")
+    .addOptions(
+      Object.entries(TICKET_CATEGORIES).map(([key, c]) => ({
+        value: key,
+        label: c.label,
+        description: c.hint,
+        emoji: c.emoji,
+      })),
     );
 
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    ...Object.entries(TICKET_CATEGORIES).map(([key, v]) =>
-      new ButtonBuilder()
-        .setCustomId(buildId("ticket", "open", key))
-        .setLabel(v.label)
-        .setEmoji(v.emoji)
-        .setStyle(ButtonStyle.Secondary),
-    ),
-  );
-
-  return { embeds: [embed], components: [row] };
+  return {
+    embeds: [embed],
+    components: [
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
+    ],
+  };
 }
 
 export const handleTicketComponent: ComponentHandler = async (
@@ -96,8 +134,12 @@ export const handleTicketComponent: ComponentHandler = async (
 ) => {
   switch (action) {
     case "open": {
-      if (!interaction.isButton()) return;
-      const category = args[0] ?? "support";
+      if (interaction.isModalSubmit()) return;
+      // Menu déroulant du panneau ; `args[0]` couvre les panneaux à boutons
+      // publiés avant, tant qu'ils n'ont pas été republiés.
+      const category = interaction.isStringSelectMenu()
+        ? (interaction.values[0] ?? "support")
+        : (args[0] ?? "support");
       const modal = new ModalBuilder()
         .setCustomId(buildId("ticket", "modal", category))
         .setTitle(`Ticket — ${TICKET_CATEGORIES[category]?.label ?? "Support"}`)
@@ -113,6 +155,17 @@ export const handleTicketComponent: ComponentHandler = async (
           ),
         );
       await interaction.showModal(modal);
+
+      // Le menu resterait affiché sur l'option choisie : on réédite le panneau
+      // pour le remettre à zéro (impossible via la réponse, déjà consommée par
+      // la modale — d'où l'édition directe du message).
+      if (interaction.isStringSelectMenu()) {
+        await interaction.message
+          .edit(buildTicketPanel(client))
+          .catch((err) =>
+            logger.debug({ err }, "Réinitialisation du menu de tickets impossible"),
+          );
+      }
       return;
     }
     case "modal": {
@@ -233,7 +286,7 @@ async function createTicket(
     name: ticketName(num),
     type: ChannelType.GuildText,
     parent: cfg.ticketCategoryId,
-    reason: `Ticket de ${interaction.user.tag}`,
+    reason: `Ticket de @${interaction.user.username}`,
     permissionOverwrites: [
       { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
       {
@@ -279,18 +332,35 @@ async function createTicket(
   });
 
   const info = TICKET_CATEGORIES[category] ?? TICKET_CATEGORIES.support!;
+  // Le sujet sert de titre : c'est ce qu'on lit en premier dans la liste des salons.
+  const titleLine = subject.split("\n")[0]?.slice(0, 200) || info.label;
   const welcome = brandEmbed()
-    .setTitle(`${info.emoji} Ticket #${String(num).padStart(4, "0")} — ${info.label}`)
+    .setAuthor({
+      name: `Ticket #${String(num).padStart(4, "0")} · ${info.label}`,
+      iconURL: interaction.user.displayAvatarURL({ size: 128 }),
+    })
+    .setTitle(`${info.emoji} ${titleLine}`)
     .setDescription(
       [
-        `**Sujet :** ${subject}`,
-        "",
-        "Un membre de l'équipe va te répondre dès que possible.",
-        "Ajoute ici tout détail utile (captures d'écran, pseudo Minecraft…).",
+        "> Un membre de l'équipe va te répondre dès que possible.",
+        "> Ajoute tout détail utile : captures d'écran, pseudo Minecraft, date et heure.",
       ].join("\n"),
     )
-    .setFooter({ text: `Ouvert par ${interaction.user.tag}` })
-    .setTimestamp();
+    .addFields(
+      { name: "Ouvert par", value: `<@${interaction.user.id}>`, inline: true },
+      { name: "Catégorie", value: `${info.emoji} ${info.label}`, inline: true },
+      {
+        name: "Ouvert",
+        value: `<t:${Math.floor(Date.now() / 1_000)}:R>`,
+        inline: true,
+      },
+    )
+    .setFooter({ text: "✋ Réclamer : pour l'équipe • 🔒 Fermer : archive et supprime le salon" });
+
+  // Le sujet complet mérite son champ dès qu'il dépasse une ligne de titre.
+  if (subject.length > 200 || subject.includes("\n")) {
+    welcome.spliceFields(0, 0, { name: "Sujet", value: subject.slice(0, 1024) });
+  }
 
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
