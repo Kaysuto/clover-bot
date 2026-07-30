@@ -1,0 +1,1 @@
+ALTER TABLE "bot_temp_voice" ADD COLUMN "panel_message_id" text;

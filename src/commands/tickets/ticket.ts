@@ -6,10 +6,11 @@ import {
   SlashCommandBuilder,
   type TextChannel,
 } from "discord.js";
-import { updateGuildConfig } from "../../db/guild-config";
+import { getGuildConfig, updateGuildConfig } from "../../db/guild-config";
 import { errorEmbed, successEmbed } from "../../lib/embeds";
 import {
   buildTicketPanel,
+  canManageTicket,
   closeTicket,
   getTicketByChannel,
 } from "../../modules/tickets/manager";
@@ -101,11 +102,9 @@ const ticket: Command = {
       return;
     }
 
-    const isStaff = interaction.member.permissions.has(
-      PermissionFlagsBits.ManageGuild,
-    );
-    const isOpener = row.openerId === interaction.user.id;
-    if (!isStaff && !isOpener) {
+    // Même contrôle que les boutons du ticket : auteur, rôle support ou ManageGuild.
+    const cfg = await getGuildConfig(interaction.guildId);
+    if (!canManageTicket(interaction.member, cfg, row)) {
       await interaction.reply({
         embeds: [errorEmbed("Seuls l'auteur du ticket et le staff peuvent gérer ce ticket.")],
         flags: MessageFlags.Ephemeral,
@@ -153,13 +152,16 @@ const ticket: Command = {
     await interaction.reply({
       embeds: [successEmbed("Fermeture du ticket, archivage en cours… 🔒")],
     });
-    await closeTicket(
+    const closed = await closeTicket(
       client,
       channel,
       row,
       interaction.user.id,
       interaction.options.getString("raison"),
     );
+    if (!closed.ok) {
+      await interaction.followUp({ embeds: [errorEmbed(closed.error)] });
+    }
   },
 };
 
