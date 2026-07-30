@@ -236,6 +236,8 @@ export const botTempVoice = pgTable("bot_temp_voice", {
   voiceChannelId: text("voice_channel_id").primaryKey(),
   guildId: text("guild_id").notNull(),
   textChannelId: text("text_channel_id").notNull(),
+  /** Message de gestion à réactualiser quand l'état du vocal change. */
+  panelMessageId: text("panel_message_id"),
   ownerId: text("owner_id").notNull(),
   locked: boolean("locked").notNull().default(false),
   userLimit: integer("user_limit").notNull().default(0),

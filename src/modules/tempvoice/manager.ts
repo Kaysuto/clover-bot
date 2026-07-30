@@ -1,5 +1,9 @@
 import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ChannelType,
+  type Client,
   type Guild,
   type GuildMember,
   PermissionFlagsBits,
@@ -12,6 +16,7 @@ import { db } from "../../db";
 import { getGuildConfig, type GuildConfig } from "../../db/guild-config";
 import { botTempVoice } from "../../db/schema";
 import { brandEmbed } from "../../lib/embeds";
+import { buildId } from "../../lib/ids";
 import { logger } from "../../lib/logger";
 
 export type TempVoiceRow = typeof botTempVoice.$inferSelect;
@@ -27,23 +32,120 @@ export async function getTempVoiceRow(
   return row ?? null;
 }
 
-function commandsEmbed(owner: GuildMember) {
-  return brandEmbed()
-    .setTitle("🔊 Ton vocal temporaire est prêt !")
+/** Résolution depuis le salon texte : point d'entrée des boutons de gestion. */
+export async function getTempVoiceRowByText(
+  textChannelId: string,
+): Promise<TempVoiceRow | null> {
+  const [row] = await db
+    .select()
+    .from(botTempVoice)
+    .where(eq(botTempVoice.textChannelId, textChannelId))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Panneau de gestion : l'embed affiche l'état courant (propriétaire, verrou,
+ * places) et les boutons s'adaptent — pas de « Verrouiller » sur un vocal déjà
+ * verrouillé.
+ */
+function panelEmbed(client: Client, owner: GuildMember | null, row: TempVoiceRow) {
+  const embed = brandEmbed()
+    .setAuthor({
+      name: "Clover Games · Vocaux temporaires",
+      iconURL: client.user?.displayAvatarURL({ size: 128 }),
+    })
+    .setTitle(`🔊 Vocal de ${owner?.displayName ?? "—"}`)
     .setDescription(
       [
-        `Bienvenue ${owner} ! Ce salon textuel est réservé aux membres de ton vocal.`,
-        "Le vocal et ce salon seront **supprimés automatiquement** quand le vocal sera vide.",
-        "",
-        "**Commandes de gestion (propriétaire uniquement) :**",
-        "· `/voc verrouiller` — empêcher de nouvelles personnes de rejoindre",
-        "· `/voc deverrouiller` — rouvrir le vocal à tous",
-        "· `/voc limite nombre:<0-99>` — limiter le nombre de places (0 = illimité)",
-        "· `/voc renommer nom:<texte>` — renommer le vocal",
-        "· `/voc expulser membre:<@membre>` — expulser quelqu'un du vocal",
-        "· `/voc transferer membre:<@membre>` — donner la propriété du vocal",
-        "· `/voc claim` — récupérer la propriété si le propriétaire est parti",
+        "> Ce salon textuel est **privé** : seuls les membres de ton vocal le voient.",
+        "> Le vocal et ce salon sont **supprimés automatiquement** dès que le vocal se vide.",
       ].join("\n"),
+    )
+    .addFields(
+      {
+        name: "👑 Propriétaire",
+        value: owner ? `<@${owner.id}>` : "*parti — « Réclamer » est ouvert*",
+        inline: true,
+      },
+      {
+        name: "🔒 Accès",
+        value: row.locked ? "Verrouillé" : "Ouvert à tous",
+        inline: true,
+      },
+      {
+        name: "🔢 Places",
+        value: row.userLimit === 0 ? "Illimité" : `${row.userLimit}`,
+        inline: true,
+      },
+    )
+    .setFooter({
+      text: "Boutons réservés au propriétaire — sauf Réclamer, s'il a quitté le vocal. Mêmes actions en /voc",
+    });
+
+  if (owner) embed.setThumbnail(owner.displayAvatarURL({ size: 128 }));
+  return embed;
+}
+
+/** Boutons de gestion, publiés sous l'embed du salon texte. */
+export function buildVoiceControls(
+  row: TempVoiceRow,
+): ActionRowBuilder<ButtonBuilder>[] {
+  const button = (
+    action: string,
+    label: string,
+    emoji: string,
+    style: ButtonStyle,
+    disabled = false,
+  ) =>
+    new ButtonBuilder()
+      .setCustomId(buildId("voc", action))
+      .setLabel(label)
+      .setEmoji(emoji)
+      .setStyle(style)
+      .setDisabled(disabled);
+
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      button("lock", "Verrouiller", "🔒", ButtonStyle.Secondary, row.locked),
+      button("unlock", "Déverrouiller", "🔓", ButtonStyle.Secondary, !row.locked),
+      button("limit", "Places", "🔢", ButtonStyle.Secondary),
+      button("rename", "Renommer", "✏️", ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      button("kick", "Expulser", "👢", ButtonStyle.Danger),
+      button("transfer", "Transférer", "👑", ButtonStyle.Primary),
+      button("claim", "Réclamer", "🙋", ButtonStyle.Success),
+    ),
+  ];
+}
+
+/**
+ * Réactualise le panneau après un changement d'état (verrou, places,
+ * propriétaire). Relit la ligne : l'action vient peut-être d'une autre voie
+ * (`/voc`) que le clic sur les boutons.
+ */
+export async function refreshVoicePanel(
+  guild: Guild,
+  voiceChannelId: string,
+): Promise<void> {
+  const row = await getTempVoiceRow(voiceChannelId);
+  if (!row?.panelMessageId) return;
+
+  const text = guild.channels.cache.get(row.textChannelId);
+  if (!text?.isTextBased()) return;
+
+  const message = await text.messages.fetch(row.panelMessageId).catch(() => null);
+  if (!message) return;
+
+  const owner = await guild.members.fetch(row.ownerId).catch(() => null);
+  await message
+    .edit({
+      embeds: [panelEmbed(guild.client, owner, row)],
+      components: buildVoiceControls(row),
+    })
+    .catch((err) =>
+      logger.debug({ err, voiceChannelId }, "Actualisation du panneau vocal impossible"),
     );
 }
 
@@ -137,12 +239,15 @@ async function createTempVoice(
     ],
   });
 
-  await db.insert(botTempVoice).values({
-    voiceChannelId: voice.id,
-    guildId: guild.id,
-    textChannelId: text.id,
-    ownerId: member.id,
-  });
+  const [row] = await db
+    .insert(botTempVoice)
+    .values({
+      voiceChannelId: voice.id,
+      guildId: guild.id,
+      textChannelId: text.id,
+      ownerId: member.id,
+    })
+    .returning();
 
   // Déplacer le membre depuis le hub ; s'il est déjà parti, on nettoie tout.
   try {
@@ -156,9 +261,23 @@ async function createTempVoice(
     return;
   }
 
-  await text
-    .send({ content: `${member}`, embeds: [commandsEmbed(member)] })
-    .catch(() => undefined);
+  if (!row) return;
+
+  const panel = await text
+    .send({
+      content: `${member}`,
+      embeds: [panelEmbed(client, member, row)],
+      components: buildVoiceControls(row),
+    })
+    .catch(() => null);
+
+  // L'identifiant du panneau permet de le réactualiser à chaque changement.
+  if (panel) {
+    await db
+      .update(botTempVoice)
+      .set({ panelMessageId: panel.id })
+      .where(eq(botTempVoice.voiceChannelId, voice.id));
+  }
 }
 
 export async function deleteTempVoice(

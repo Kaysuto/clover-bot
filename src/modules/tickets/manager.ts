@@ -3,6 +3,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
+  type GuildMember,
   type GuildTextBasedChannel,
   MessageFlags,
   ModalBuilder,
@@ -71,16 +72,27 @@ export async function getTicketByChannel(
   return row ?? null;
 }
 
-function isSupport(
-  interaction: ComponentInteraction,
-  cfg: GuildConfig,
-): boolean {
+function isSupport(member: GuildMember, cfg: GuildConfig): boolean {
   return (
-    interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) ||
+    member.permissions.has(PermissionFlagsBits.ManageGuild) ||
     (cfg.ticketSupportRoleId
-      ? interaction.member.roles.cache.has(cfg.ticketSupportRoleId)
+      ? member.roles.cache.has(cfg.ticketSupportRoleId)
       : false)
   );
+}
+
+/**
+ * Contrôle d'accès à la gestion d'un ticket (fermeture, ajout/retrait de
+ * membres) : auteur du ticket, rôle support ou permission ManageGuild.
+ * Partagé entre la commande slash et les boutons — un membre simplement
+ * ajouté au salon ne doit pas pouvoir fermer et supprimer le ticket.
+ */
+export function canManageTicket(
+  member: GuildMember,
+  cfg: GuildConfig,
+  row: TicketRow,
+): boolean {
+  return row.openerId === member.id || isSupport(member, cfg);
 }
 
 /** Panneau publié par /ticket setup. */
@@ -185,6 +197,24 @@ export const handleTicketComponent: ComponentHandler = async (
     }
     case "close": {
       if (!interaction.isButton()) return;
+      // Même contrôle que la commande slash : le bouton est visible par tout
+      // membre du salon (dont les membres ajoutés via /ticket add).
+      const row = await getTicketByChannel(interaction.channelId);
+      if (!row || row.status === "CLOSED") {
+        await interaction.reply({
+          embeds: [errorEmbed("Ce ticket est déjà fermé.")],
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      const cfg = await getGuildConfig(interaction.guild.id);
+      if (!canManageTicket(interaction.member, cfg, row)) {
+        await interaction.reply({
+          embeds: [errorEmbed("Seuls l'auteur du ticket et l'équipe support peuvent le fermer.")],
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
       const confirmRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId(buildId("ticket", "closeok"))
@@ -213,17 +243,33 @@ export const handleTicketComponent: ComponentHandler = async (
         });
         return;
       }
+      // Revérifié ici aussi : c'est ce bouton qui déclenche réellement la
+      // fermeture, il ne doit jamais faire confiance à l'étape précédente.
+      const cfg = await getGuildConfig(interaction.guild.id);
+      if (!canManageTicket(interaction.member, cfg, row)) {
+        await interaction.update({
+          embeds: [errorEmbed("Seuls l'auteur du ticket et l'équipe support peuvent le fermer.")],
+          components: [],
+        });
+        return;
+      }
       await interaction.update({
         embeds: [brandEmbed().setDescription("🔒 Fermeture du ticket…")],
         components: [],
       });
-      await closeTicket(
+      const closed = await closeTicket(
         client,
         interaction.channel as TextChannel,
         row,
         interaction.user.id,
         null,
       );
+      if (!closed.ok) {
+        await interaction.followUp({
+          embeds: [errorEmbed(closed.error)],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
       return;
     }
   }
@@ -388,7 +434,7 @@ async function createTicket(
 
 async function claimTicket(interaction: ComponentInteraction): Promise<void> {
   const cfg = await getGuildConfig(interaction.guild.id);
-  if (!isSupport(interaction, cfg)) {
+  if (!isSupport(interaction.member, cfg)) {
     await interaction.reply({
       embeds: [errorEmbed("Seule l'équipe support peut réclamer un ticket.")],
       flags: MessageFlags.Ephemeral,
@@ -419,19 +465,29 @@ async function claimTicket(interaction: ComponentInteraction): Promise<void> {
   });
 }
 
-/** Ferme un ticket : transcript HTML → salon archive → suppression du salon. */
+export type CloseTicketResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Ferme un ticket : transcript HTML → salon archive → suppression du salon.
+ *
+ * La fermeture est abandonnée (le ticket reste ouvert, le salon intact) si le
+ * transcript ne peut pas être généré ou si l'archive ne peut pas le recevoir :
+ * le salon est la seule copie de l'échange, le supprimer sans archive
+ * détruirait l'historique. En dernier recours, supprimer le salon à la main —
+ * reconcileTickets marquera le ticket CLOSED au démarrage suivant.
+ */
 export async function closeTicket(
   client: CloverClient,
   channel: TextChannel,
   row: TicketRow,
   closedById: string,
   reason: string | null,
-): Promise<void> {
+): Promise<CloseTicketResult> {
   const cfg = await getGuildConfig(row.guildId);
   const info = TICKET_CATEGORIES[row.category] ?? TICKET_CATEGORIES.support!;
 
-  // Transcript HTML complet
-  let transcript = null;
+  // Transcript HTML complet — obligatoire avant toute suppression.
+  let transcript;
   try {
     transcript = await createTranscript(channel, {
       limit: -1,
@@ -440,42 +496,73 @@ export async function closeTicket(
       poweredBy: false,
     });
   } catch (err) {
-    logger.error({ err, ticket: row.id }, "Génération du transcript impossible");
+    logger.error(
+      { err, ticket: row.id },
+      "Génération du transcript impossible — fermeture abandonnée",
+    );
+    return {
+      ok: false,
+      error:
+        "La génération du transcript a échoué : le ticket reste ouvert. Réessaie dans quelques instants.",
+    };
   }
 
-  // Archive
-  if (cfg.ticketArchiveChannelId) {
-    const archive = (await channel.guild.channels
-      .fetch(cfg.ticketArchiveChannelId)
-      .catch(() => null)) as GuildTextBasedChannel | null;
-    if (archive?.isSendable()) {
-      const recap = brandEmbed()
-        .setTitle(
-          `📁 ${ticketName(row.ticketNumber)} — ${info.emoji} ${info.label}`,
-        )
-        .addFields(
-          { name: "Sujet", value: row.subject.slice(0, 1024) },
-          { name: "Ouvert par", value: `<@${row.openerId}>`, inline: true },
-          {
-            name: "Pris en charge par",
-            value: row.claimedBy ? `<@${row.claimedBy}>` : "—",
-            inline: true,
-          },
-          { name: "Fermé par", value: `<@${closedById}>`, inline: true },
-          {
-            name: "Durée",
-            value: formatDuration(Date.now() - row.openedAt.getTime()),
-            inline: true,
-          },
-          ...(reason ? [{ name: "Raison", value: reason.slice(0, 1024) }] : []),
-        )
-        .setTimestamp();
-      await archive
-        .send({ embeds: [recap], files: transcript ? [transcript] : [] })
-        .catch((err) => logger.error({ err }, "Archivage du ticket impossible"));
-    }
+  // Archive — elle aussi obligatoire.
+  if (!cfg.ticketArchiveChannelId) {
+    return {
+      ok: false,
+      error:
+        "Aucun salon d'archives n'est configuré (`/config tickets …`) : le ticket reste ouvert pour ne pas perdre le transcript.",
+    };
+  }
+  const archive = (await channel.guild.channels
+    .fetch(cfg.ticketArchiveChannelId)
+    .catch(() => null)) as GuildTextBasedChannel | null;
+  if (!archive?.isSendable()) {
+    return {
+      ok: false,
+      error:
+        "Le salon d'archives est introuvable ou inaccessible : le ticket reste ouvert pour ne pas perdre le transcript.",
+    };
   }
 
+  const recap = brandEmbed()
+    .setTitle(
+      `📁 ${ticketName(row.ticketNumber)} — ${info.emoji} ${info.label}`,
+    )
+    .addFields(
+      { name: "Sujet", value: row.subject.slice(0, 1024) },
+      { name: "Ouvert par", value: `<@${row.openerId}>`, inline: true },
+      {
+        name: "Pris en charge par",
+        value: row.claimedBy ? `<@${row.claimedBy}>` : "—",
+        inline: true,
+      },
+      { name: "Fermé par", value: `<@${closedById}>`, inline: true },
+      {
+        name: "Durée",
+        value: formatDuration(Date.now() - row.openedAt.getTime()),
+        inline: true,
+      },
+      ...(reason ? [{ name: "Raison", value: reason.slice(0, 1024) }] : []),
+    )
+    .setTimestamp();
+
+  try {
+    await archive.send({ embeds: [recap], files: [transcript] });
+  } catch (err) {
+    logger.error(
+      { err, ticket: row.id },
+      "Archivage du ticket impossible — fermeture abandonnée",
+    );
+    return {
+      ok: false,
+      error:
+        "L'envoi du transcript dans les archives a échoué : le ticket reste ouvert.",
+    };
+  }
+
+  // L'archive est en sécurité : on peut clôturer puis supprimer le salon.
   await db
     .update(botTickets)
     .set({
@@ -489,6 +576,8 @@ export async function closeTicket(
   await channel.delete(`Ticket fermé par ${closedById}`).catch((err) =>
     logger.warn({ err }, "Suppression du salon ticket impossible"),
   );
+
+  return { ok: true };
 }
 
 /** Au démarrage : les tickets dont le salon a disparu passent CLOSED. */
