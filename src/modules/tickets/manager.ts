@@ -580,6 +580,38 @@ export async function closeTicket(
   return { ok: true };
 }
 
+/**
+ * Au démarrage : remet le panneau publié au format courant (menu déroulant,
+ * libellés…). Sans ça, un panneau publié par une ancienne version resterait
+ * tel quel jusqu'à un `/ticket setup` manuel.
+ */
+export async function refreshTicketPanels(client: CloverClient): Promise<void> {
+  for (const guild of client.guilds.cache.values()) {
+    const cfg = await getGuildConfig(guild.id);
+    if (!cfg.ticketPanelChannelId || !cfg.ticketPanelMessageId) continue;
+
+    const channel = await guild.channels
+      .fetch(cfg.ticketPanelChannelId)
+      .catch(() => null);
+    if (!channel?.isTextBased()) continue;
+
+    const message = await channel.messages
+      .fetch(cfg.ticketPanelMessageId)
+      .catch(() => null);
+    if (!message) {
+      logger.warn(
+        { guildId: guild.id },
+        "Panneau de tickets introuvable — republier avec /ticket setup",
+      );
+      continue;
+    }
+
+    await message
+      .edit(buildTicketPanel(client))
+      .catch((err) => logger.warn({ err }, "Actualisation du panneau de tickets impossible"));
+  }
+}
+
 /** Au démarrage : les tickets dont le salon a disparu passent CLOSED. */
 export async function reconcileTickets(client: CloverClient): Promise<void> {
   const rows = await db

@@ -121,6 +121,56 @@ export function buildVoiceControls(
 }
 
 /**
+ * Met le panneau du salon texte à l'état courant. Trois cas couverts :
+ * le panneau connu (édition), un vocal antérieur aux boutons ou dont la ligne a
+ * perdu la référence (on adopte le message d'accueil du bot), et un panneau
+ * supprimé (republication).
+ */
+export async function ensureVoicePanel(
+  guild: Guild,
+  row: TempVoiceRow,
+): Promise<void> {
+  const text = guild.channels.cache.get(row.textChannelId);
+  if (!text?.isTextBased()) return;
+
+  let message = row.panelMessageId
+    ? await text.messages.fetch(row.panelMessageId).catch(() => null)
+    : null;
+
+  if (!message) {
+    // Le message d'accueil est le premier du salon, et le bot en est l'auteur.
+    const oldest = await text.messages
+      .fetch({ limit: 5, after: "0" })
+      .catch(() => null);
+    message = oldest?.find((m) => m.author.id === guild.client.user.id) ?? null;
+  }
+
+  const owner = await guild.members.fetch(row.ownerId).catch(() => null);
+  const payload = {
+    embeds: [panelEmbed(guild.client, owner, row)],
+    components: buildVoiceControls(row),
+  };
+
+  const panel = message
+    ? await message.edit(payload).catch(() => null)
+    : await text.send(payload).catch(() => null);
+  if (!panel) {
+    logger.debug(
+      { voiceChannelId: row.voiceChannelId },
+      "Panneau vocal non actualisé",
+    );
+    return;
+  }
+
+  if (panel.id !== row.panelMessageId) {
+    await db
+      .update(botTempVoice)
+      .set({ panelMessageId: panel.id })
+      .where(eq(botTempVoice.voiceChannelId, row.voiceChannelId));
+  }
+}
+
+/**
  * Réactualise le panneau après un changement d'état (verrou, places,
  * propriétaire). Relit la ligne : l'action vient peut-être d'une autre voie
  * (`/voc`) que le clic sur les boutons.
@@ -130,23 +180,7 @@ export async function refreshVoicePanel(
   voiceChannelId: string,
 ): Promise<void> {
   const row = await getTempVoiceRow(voiceChannelId);
-  if (!row?.panelMessageId) return;
-
-  const text = guild.channels.cache.get(row.textChannelId);
-  if (!text?.isTextBased()) return;
-
-  const message = await text.messages.fetch(row.panelMessageId).catch(() => null);
-  if (!message) return;
-
-  const owner = await guild.members.fetch(row.ownerId).catch(() => null);
-  await message
-    .edit({
-      embeds: [panelEmbed(guild.client, owner, row)],
-      components: buildVoiceControls(row),
-    })
-    .catch((err) =>
-      logger.debug({ err, voiceChannelId }, "Actualisation du panneau vocal impossible"),
-    );
+  if (row) await ensureVoicePanel(guild, row);
 }
 
 /** Réagit aux mouvements vocaux : création via le hub, accès au salon texte, nettoyage. */
@@ -344,7 +378,18 @@ export async function cleanupTempVoice(client: CloverClient): Promise<void> {
     const humans = (voice as VoiceChannel).members.filter(
       (m) => !m.user.bot,
     ).size;
-    if (humans === 0) await deleteTempVoice(guild, row);
+    if (humans === 0) {
+      await deleteTempVoice(guild, row);
+      continue;
+    }
+    // Vocal toujours occupé : son panneau est remis au format courant, ce qui
+    // rattrape ceux créés avant l'ajout des boutons.
+    await ensureVoicePanel(guild, row).catch((err) =>
+      logger.debug(
+        { err, voiceChannelId: row.voiceChannelId },
+        "Panneau vocal non actualisé au démarrage",
+      ),
+    );
   }
 
   // Salons orphelins dans la catégorie dédiée (créés juste avant un crash)

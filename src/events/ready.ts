@@ -8,7 +8,7 @@ import { tickMemberCounter } from "../modules/member-counter/job";
 import { tickStatus } from "../modules/status/monitor";
 import { syncGuild } from "../modules/sync/manager";
 import { cleanupTempVoice } from "../modules/tempvoice/manager";
-import { reconcileTickets } from "../modules/tickets/manager";
+import { reconcileTickets, refreshTicketPanels } from "../modules/tickets/manager";
 import type { EventHandler } from "../types";
 
 const ready: EventHandler<"clientReady"> = {
@@ -28,6 +28,9 @@ const ready: EventHandler<"clientReady"> = {
     );
     await reconcileTickets(client).catch((err) =>
       logger.error({ err }, "Réconciliation des tickets impossible"),
+    );
+    await refreshTicketPanels(client).catch((err) =>
+      logger.error({ err }, "Actualisation des panneaux de tickets impossible"),
     );
 
     // Jobs périodiques — tous relisent la DB, donc reprise automatique
