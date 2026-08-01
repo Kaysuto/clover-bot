@@ -42,3 +42,17 @@ export type ComponentHandler = (
   args: string[],
   client: CloverClient,
 ) => Promise<void>;
+
+/** Interaction de composant reçue en message privé : aucune guilde, donc ni
+ * `member` ni `guild` — le contexte doit venir du customId ou de la base. */
+export type DmComponentInteraction =
+  | MessageComponentInteraction
+  | ModalSubmitInteraction;
+
+/** Handler des composants publiés en MP (voir `dmComponentHandlers`). */
+export type DmComponentHandler = (
+  interaction: DmComponentInteraction,
+  action: string,
+  args: string[],
+  client: CloverClient,
+) => Promise<void>;

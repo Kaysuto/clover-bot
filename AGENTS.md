@@ -9,6 +9,7 @@ Bot Discord officiel du réseau Clover Games. Dépôt git indépendant au sein d
 - **Lecture seule sur les tables du site** : `users_meta` (miroir dans `src/db/site-schema.ts`) appartient au site — le bot ne doit JAMAIS y écrire. Les tables du bot sont préfixées `bot_*` et gérées par les migrations de CE dépôt uniquement (`tablesFilter: ["bot_*"]` dans `drizzle.config.ts`).
 - **Pas de timer long en mémoire** : tout ce qui doit survivre à un redémarrage (giveaways, compteurs…) est relu depuis la DB par les jobs périodiques (`src/lib/scheduler.ts`).
 - **Intent MessageContent volontairement absent** : l'XP par message n'en a pas besoin (`messageCreate` s'émet sans lui). Ne pas l'ajouter sans raison forte — c'est aussi pourquoi les logs ne couvrent pas les messages supprimés/édités.
+- **Deux tables de routage de composants** : `componentHandlers` (en guilde, typé `"cached"`) et `dmComponentHandlers` (en MP, sans guilde ni membre). Le sondage de départ est reçu en MP — son contexte vient donc du customId et de la base, jamais de `interaction.guild`.
 - **Les logs ne doivent jamais faire échouer un événement** : `sendLog` avale ses erreurs, et chaque appel depuis `events/` est suffixé d'un `.catch()`. Toute nouvelle catégorie s'ajoute dans `modules/logs/channel.ts` (`LOG_CATEGORIES`), le reste suit.
 
 ## Architecture
@@ -23,7 +24,7 @@ src/
 ├─ commands/<domaine>/ commandes slash (1 fichier = 1 commande)
 ├─ events/             1 fichier = 1 événement gateway, logique déléguée aux modules
 ├─ modules/<feature>/  logique métier (leveling, giveaways, invites, logs, sync,
-│                      mc-counter, status, tempvoice, tickets)
+│                      mc-counter, status, tempvoice, tickets, welcome)
 ├─ db/                 schema.ts (tables bot_*), site-schema.ts (miroir RO),
 │                      guild-config.ts (helper), index.ts (pool pg + drizzle)
 └─ lib/                logger, scheduler, mc-status, rcon, embeds, ids, duration
@@ -43,4 +44,4 @@ npm run db:migrate   # appliquer les migrations (Neon)
 
 - **PostgreSQL Neon** (partagé avec le site) : tables `bot_*` + lecture `users_meta`. Suivi de migrations séparé (`drizzle.__bot_migrations`).
 - **Serveur Minecraft** : ping SLP via `minecraft-server-util` (`lib/mc-status.ts`), RCON optionnel (`lib/rcon.ts`, adapté de `siteweb/src/lib/rcon.ts`).
-- **Phase 2 prévue** : liaison par code in-game via une table MySQL `clover_discord_link_codes` écrite par le module `discordlink` (à créer) du plugin clover-core — voir le pattern inbox dans `Plugin de Clover Games/clover/documentation/GADGET_SITE_INTEGRATION.md`. Le lien résultant vit dans `bot_minecraft_links` ; `users_meta` (site) prime toujours.
+- **Liaison par code in-game** : `/lier` en jeu (module `link` du plugin clover-core) génère un code dans la table MySQL `clover_link_codes` ; `/lier code:XXXX` sur Discord le consomme (`src/lib/mc-db.ts`, UPDATE gardé à usage unique — contrat : `Plugin/clover/documentation/modules/link.md`) et écrit dans `bot_minecraft_links`. `users_meta` (site) prime toujours et le job `site-links-delta` (60 s) répercute les liaisons faites sur le site ; ne jamais écrire dans `users_meta`. Le bot recopie ensuite la liaison dans le miroir MySQL `clover_link_accounts` (`recordLinkMirror` / `forgetLinkMirror`) pour que `/lier` en jeu cesse de proposer Discord : écriture consultative, best-effort, et **uniquement les lignes `source = 'BOT'`** — celles du site décrivent une liaison Discord qui survit à un `/delier`.

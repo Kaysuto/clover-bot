@@ -1,12 +1,14 @@
 import { ActivityType, Client, Collection, GatewayIntentBits } from "discord.js";
 import { env } from "./config";
-import type { Command, ComponentHandler } from "./types";
+import type { Command, ComponentHandler, DmComponentHandler } from "./types";
 
 export class CloverClient extends Client {
   /** Commandes slash, indexées par nom. */
   readonly commands = new Collection<string, Command>();
   /** Handlers de composants/modals, indexés par préfixe de customId. */
   readonly components = new Collection<string, ComponentHandler>();
+  /** Idem, pour les composants publiés en message privé (hors guilde). */
+  readonly dmComponents = new Collection<string, DmComponentHandler>();
 
   constructor() {
     super({

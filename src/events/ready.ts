@@ -1,3 +1,4 @@
+import { syncGuildCommands } from "../lib/command-sync";
 import { logger } from "../lib/logger";
 import { registerJob } from "../lib/scheduler";
 import { tickGiveaways } from "../modules/giveaways/manager";
@@ -6,6 +7,7 @@ import { tickVoiceXp } from "../modules/leveling/voice-xp";
 import { tickMcCounter } from "../modules/mc-counter/job";
 import { tickMemberCounter } from "../modules/member-counter/job";
 import { tickStatus } from "../modules/status/monitor";
+import { tickSiteLinksDelta } from "../modules/sync/delta";
 import { syncGuild } from "../modules/sync/manager";
 import { cleanupTempVoice } from "../modules/tempvoice/manager";
 import { reconcileTickets, refreshTicketPanels } from "../modules/tickets/manager";
@@ -16,6 +18,11 @@ const ready: EventHandler<"clientReady"> = {
   once: true,
   async execute(client) {
     logger.info(`✅ Connecté en tant que ${client.user?.tag}`);
+
+    // Une commande ajoutée au code doit exister sur Discord sans étape manuelle.
+    await syncGuildCommands(client).catch((err) =>
+      logger.error({ err }, "Publication des slash commands impossible"),
+    );
 
     // Remise en cohérence après redémarrage
     for (const guild of client.guilds.cache.values()) {
@@ -72,6 +79,11 @@ const ready: EventHandler<"clientReady"> = {
         }
       },
       runOnStart: true,
+    });
+    registerJob({
+      name: "site-links-delta",
+      intervalMs: 60_000, // liaison faite sur le site → rôle/pseudo Discord en ~1 min
+      run: () => tickSiteLinksDelta(client),
     });
     registerJob({
       name: "invites-refresh",

@@ -34,12 +34,13 @@ const envSchema = z.object({
   WEBSITE_URL: z.string().min(1).default("https://clovergames.fr"),
   DISCORD_MONITORING_WEBHOOK_URL: optionalString,
 
-  // Phase 2 — codes de liaison in-game
+  // Codes de liaison in-game (table clover_link_codes du plugin, module link)
   MINECRAFT_DB_HOST: optionalString,
   MINECRAFT_DB_PORT: optionalPort,
   MINECRAFT_DB_USER: optionalString,
   MINECRAFT_DB_PASSWORD: optionalString,
   MINECRAFT_DB_NAME: optionalString,
+  MINECRAFT_DB_TABLE_PREFIX: optionalString,
 
   LOG_LEVEL: z.string().default("info"),
   NODE_ENV: z.enum(["development", "production"]).default("development"),
@@ -59,4 +60,9 @@ export const env = parsed.data;
 
 export const rconConfigured = Boolean(
   env.RCON_HOST && env.RCON_PORT && env.RCON_PASSWORD,
+);
+
+/** MySQL du plugin (codes de liaison). Le mot de passe peut légitimement être vide en dev. */
+export const linkDbConfigured = Boolean(
+  env.MINECRAFT_DB_HOST && env.MINECRAFT_DB_USER && env.MINECRAFT_DB_NAME,
 );

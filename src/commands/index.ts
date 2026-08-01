@@ -6,6 +6,8 @@ import giveaway from "./giveaways/giveaway";
 import invites from "./invites/invites";
 import classement from "./leveling/classement";
 import rank from "./leveling/rank";
+import delier from "./sync/delier";
+import lier from "./sync/lier";
 import sync from "./sync/sync";
 import ticket from "./tickets/ticket";
 import voc from "./voice/voc";
@@ -19,6 +21,8 @@ export const commands: Command[] = [
   giveaway,
   invites,
   sync,
+  lier,
+  delier,
   voc,
   ticket,
 ];

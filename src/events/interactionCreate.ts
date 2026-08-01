@@ -20,8 +20,15 @@ const interactionCreate: EventHandler<"interactionCreate"> = {
       }
 
       if (interaction.isMessageComponent() || interaction.isModalSubmit()) {
-        if (!interaction.inCachedGuild()) return;
         const { prefix, action, args } = parseId(interaction.customId);
+        // Sondage de départ : le membre a quitté la guilde, l'interaction
+        // arrive donc en MP et n'a ni guilde ni membre à résoudre.
+        if (!interaction.inGuild()) {
+          const dmHandler = client.dmComponents.get(prefix);
+          if (dmHandler) await dmHandler(interaction, action, args, client);
+          return;
+        }
+        if (!interaction.inCachedGuild()) return;
         const handler = client.components.get(prefix);
         if (handler) await handler(interaction, action, args, client);
         return;

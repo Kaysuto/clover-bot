@@ -21,6 +21,16 @@ import {
   setLogSetting,
 } from "../../modules/logs/channel";
 import { countHumanMembers } from "../../modules/member-counter/job";
+import {
+  DEFAULT_WELCOME_MESSAGE,
+  WELCOME_PLACEHOLDERS,
+  welcomeEmbed,
+} from "../../modules/welcome/join";
+import {
+  getLeaveFeedbackStats,
+  statsEmbed,
+  surveyEmbed,
+} from "../../modules/welcome/leave";
 import type { Command } from "../../types";
 
 /** Choix proposés dans les options `categorie` du groupe `logs`. */
@@ -133,6 +143,69 @@ const config: Command = {
             .addIntegerOption((o) =>
               o.setName("niveau").setDescription("Niveau concerné").setRequired(true).setMinValue(1),
             ),
+        ),
+    )
+    // ── Accueil et départ ──
+    .addSubcommandGroup((g) =>
+      g
+        .setName("accueil")
+        .setDescription("Messages privés de bienvenue et sondage de départ")
+        .addSubcommand((s) =>
+          s
+            .setName("bienvenue")
+            .setDescription("Activer/désactiver le MP de bienvenue à l'arrivée")
+            .addBooleanOption((o) =>
+              o.setName("actif").setDescription("Envoyer un MP de bienvenue").setRequired(true),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("bienvenue-message")
+            .setDescription(`Texte du MP de bienvenue (${WELCOME_PLACEHOLDERS})`)
+            .addStringOption((o) =>
+              o
+                .setName("texte")
+                .setDescription("Laisser vide pour revenir au message par défaut")
+                .setMaxLength(1500),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("depart")
+            .setDescription("Activer/désactiver le sondage privé « pourquoi es-tu parti ? »")
+            .addBooleanOption((o) =>
+              o.setName("actif").setDescription("Envoyer le sondage au départ").setRequired(true),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("depart-salon")
+            .setDescription("Salon où publier les retours de départ (défaut : salon de logs)")
+            .addChannelOption((o) =>
+              o
+                .setName("salon")
+                .setDescription("Salon des retours")
+                .setRequired(true)
+                .addChannelTypes(ChannelType.GuildText),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("retours")
+            .setDescription("Statistiques des raisons de départ")
+            .addIntegerOption((o) =>
+              o
+                .setName("jours")
+                .setDescription("Période analysée (30 par défaut)")
+                .setMinValue(1)
+                .setMaxValue(365),
+            ),
+        )
+        .addSubcommand((s) =>
+          s.setName("apercu").setDescription("Prévisualiser les deux messages privés"),
+        )
+        .addSubcommand((s) =>
+          s.setName("voir").setDescription("Afficher la configuration de l'accueil"),
         ),
     )
     // ── Sync ──
@@ -435,6 +508,103 @@ const config: Command = {
             and(eq(botLevelRoles.guildId, guildId), eq(botLevelRoles.level, level)),
           );
         await reply(interaction, `Récompense du niveau **${level}** supprimée.`);
+        return;
+      }
+
+      // ── Accueil et départ ──
+      case "accueil/bienvenue": {
+        const actif = interaction.options.getBoolean("actif", true);
+        await updateGuildConfig(guildId, { welcomeDmEnabled: actif });
+        await reply(
+          interaction,
+          actif
+            ? "MP de bienvenue **activé** — aperçu avec `/config accueil apercu`."
+            : "MP de bienvenue **désactivé**.",
+        );
+        return;
+      }
+      case "accueil/bienvenue-message": {
+        const texte = interaction.options.getString("texte");
+        await updateGuildConfig(guildId, { welcomeDmMessage: texte ?? null });
+        await reply(
+          interaction,
+          texte
+            ? "Message de bienvenue mis à jour — aperçu avec `/config accueil apercu`."
+            : "Message de bienvenue réinitialisé (texte par défaut).",
+        );
+        return;
+      }
+      case "accueil/depart": {
+        const actif = interaction.options.getBoolean("actif", true);
+        await updateGuildConfig(guildId, { leaveSurveyEnabled: actif });
+        await reply(
+          interaction,
+          actif
+            ? "Sondage de départ **activé** — les membres bannis ou expulsés en sont exclus."
+            : "Sondage de départ **désactivé**.",
+        );
+        return;
+      }
+      case "accueil/depart-salon": {
+        const channel = interaction.options.getChannel("salon", true);
+        await updateGuildConfig(guildId, { leaveFeedbackChannelId: channel.id });
+        await reply(interaction, `Retours de départ publiés dans ${channel}.`);
+        return;
+      }
+      case "accueil/retours": {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const jours = interaction.options.getInteger("jours") ?? 30;
+        const stats = await getLeaveFeedbackStats(guildId, jours);
+        await interaction.editReply({ embeds: [statsEmbed(stats, jours)] });
+        return;
+      }
+      case "accueil/apercu": {
+        const cfg = await getGuildConfig(guildId);
+        await interaction.reply({
+          embeds: [
+            welcomeEmbed(
+              interaction.guild,
+              interaction.user.id,
+              cfg.welcomeDmMessage ?? DEFAULT_WELCOME_MESSAGE,
+            ),
+            surveyEmbed(interaction.guild),
+          ],
+          // Les boutons et le menu sont volontairement omis : ils n'existent
+          // que dans le vrai MP, rattachés à un départ précis.
+          content:
+            "-# Aperçu des deux messages privés (les boutons ne sont pas reproduits ici).",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      case "accueil/voir": {
+        const cfg = await getGuildConfig(guildId);
+        const feedbackChannel = cfg.leaveFeedbackChannelId ?? cfg.logChannelId;
+        await interaction.reply({
+          embeds: [
+            brandEmbed()
+              .setTitle("👋 Accueil et départ")
+              .setDescription(
+                [
+                  `${cfg.welcomeDmEnabled ? "✅" : "❌"} **MP de bienvenue** — ${
+                    cfg.welcomeDmEnabled ? "activé" : "désactivé"
+                  }`,
+                  `> Message ${cfg.welcomeDmMessage ? "personnalisé" : "par défaut"} · variables : \`${WELCOME_PLACEHOLDERS}\``,
+                  "",
+                  `${cfg.leaveSurveyEnabled ? "✅" : "❌"} **Sondage de départ** — ${
+                    cfg.leaveSurveyEnabled ? "activé" : "désactivé"
+                  }`,
+                  `> Retours publiés dans ${
+                    feedbackChannel ? `<#${feedbackChannel}>` : "*aucun salon configuré*"
+                  }${cfg.leaveFeedbackChannelId ? "" : " *(salon de logs par défaut)*"}`,
+                ].join("\n"),
+              )
+              .setFooter({
+                text: "Discord n'autorise le MP de départ que si une conversation privée existe déjà — le MP de bienvenue l'ouvre.",
+              }),
+          ],
+          flags: MessageFlags.Ephemeral,
+        });
         return;
       }
 
