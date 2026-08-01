@@ -2,6 +2,7 @@ import { logger } from "../lib/logger";
 import { trackJoin } from "../modules/invites/tracker";
 import { logMemberJoin } from "../modules/logs/members";
 import { syncMember } from "../modules/sync/manager";
+import { sendWelcomeDm } from "../modules/welcome/join";
 import type { EventHandler } from "../types";
 
 const guildMemberAdd: EventHandler<"guildMemberAdd"> = {
@@ -21,6 +22,10 @@ const guildMemberAdd: EventHandler<"guildMemberAdd"> = {
         logger.error({ err, memberId: member.id }, "Synchro à l'arrivée impossible"),
       );
     }
+    // 4. MP de bienvenue (après la synchro : le membre a déjà ses rôles)
+    await sendWelcomeDm(member).catch((err) =>
+      logger.error({ err, memberId: member.id }, "MP de bienvenue impossible"),
+    );
   },
 };
 

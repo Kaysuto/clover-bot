@@ -15,6 +15,7 @@ Bot Discord officiel du réseau **Clover Games** (`clovergames.fr` · `play.clov
 | 🔊 Vocaux temporaires | `/voc …` | Rejoins « ➕ Créer ton vocal » → vocal + salon texte privé, verrouillage, limite, transfert… |
 | 📊 Statut des services | `/statut` | Embed auto-actualisé (site web, serveur Minecraft, RCON) + alerte webhook en cas de panne |
 | 🎫 Tickets | `/ticket setup\|add\|remove\|close` | Panneau à boutons, salons privés, transcript HTML archivé à la fermeture |
+| 👋 Accueil & départ | `/config accueil …` | MP de bienvenue à l'arrivée, sondage privé « pourquoi es-tu parti ? » au départ, retours publiés côté staff + statistiques |
 | 📋 Logs | `/config logs salon\|categorie\|voir` | Arrivées/départs, profils, modération, vocal, salons & rôles — 4 catégories activables, salon dédié possible par catégorie |
 | ⚙️ Configuration | `/config …` | Tout se configure en slash commands (admin) |
 
@@ -42,7 +43,7 @@ https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot+application
 cp .env.example .env    # puis remplir DISCORD_TOKEN, DISCORD_GUILD_ID, DATABASE_URL…
 npm install
 npm run db:migrate      # crée les tables bot_* sur Supabase
-npm run deploy          # publie les slash commands sur la guilde
+npm run deploy          # publie les slash commands (le bot le fait aussi au démarrage)
 npm run dev             # démarre en mode développement
 ```
 
@@ -59,6 +60,7 @@ npm run dev             # démarre en mode développement
 /config compteur membres-creer
 /config statut salon:#statut
 /config logs salon salon:#logs
+/config accueil depart-salon salon:#retours-depart
 /config niveaux recompense niveau:5 role:@Actif
 ```
 
@@ -74,15 +76,17 @@ docker compose logs -f bot
 ```
 
 - `restart: unless-stopped` relance le conteneur automatiquement après un crash ou un redémarrage du VPS (tant que le démon Docker démarre au boot — actif par défaut sur la plupart des distributions).
-- Les migrations (`npm run db:migrate`) et le déploiement des slash commands (`npm run deploy`) continuent de s'exécuter **hors du conteneur** (en local ou en CI), directement contre la base Supabase partagée — comme en développement. `DATABASE_URL` pointe sur `postgres_session` : le mode transaction de PgBouncer supporte mal le DDL.
+- Les migrations (`npm run db:migrate`) continuent de s'exécuter **hors du conteneur** (en local ou en CI), directement contre la base Supabase partagée — comme en développement. `DATABASE_URL` pointe sur `postgres_session` : le mode transaction de PgBouncer supporte mal le DDL.
+- **Slash commands** : le bot compare ses commandes à celles enregistrées sur la guilde à chaque démarrage et ne republie qu'en cas d'écart — une commande ajoutée au code ne peut donc plus rester invisible sur Discord. `npm run deploy` reste utile pour publier sans redémarrer. Seules les commandes **de guilde** sont touchées : les commandes globales de l'application (intégration Minecraft) ne sont jamais écrasées.
 - Mise à jour : `git pull && docker compose up -d --build`.
 
 ## Notes
 
 - **Invitations** : l'API Discord ne permet pas de savoir rétroactivement *qui* a invité *qui* avant l'installation du bot — les totaux existants sont repris comme « historiques », le journal nominatif commence à l'installation.
 - **Logs** : quatre catégories — **Membres** (arrivées avec âge du compte et invitation utilisée, départs, pseudos, rôles, boosts, photo de profil et nom d'utilisateur), **Modération** (expulsions, bannissements, exclusions temporaires), **Vocal** (connexions, déconnexions, déplacements), **Serveur** (salons, rôles, invitations). Tout part dans le salon par défaut ; `/config logs salon salon:#x categorie:vocal` dédie un salon à une catégorie et `/config logs categorie categorie:vocal actif:false` la coupe. Les vocaux temporaires sont exclus des logs de salons (sinon le journal serait noyé). **Pas de log de messages supprimés/édités** : cela demanderait l'intent *Message Content*, volontairement désactivé.
+- **Accueil & départ** : à l'arrivée, un **MP de bienvenue** (texte personnalisable avec `/config accueil bienvenue-message`, variables `{user}`, `{server}`, `{count}`). Au départ, un **sondage privé en un clic** — 9 raisons proposées, puis un champ libre facultatif. Les **membres bannis ou expulsés en sont exclus** (vérification des logs d'audit) : ils n'ont pas choisi de partir et fausseraient les statistiques. Chaque réponse est publiée dans `/config accueil depart-salon` (à défaut le salon de logs) et `/config accueil retours [jours]` en donne la synthèse. ⚠️ **Discord n'autorise un MP que vers un utilisateur avec qui le bot partage un serveur** : au moment du départ, ce n'est plus le cas, et le MP ne passe que si une conversation privée existe déjà — c'est précisément le rôle du MP de bienvenue. Les envois impossibles sont comptés (`MP non remis`) pour ne jamais surestimer la représentativité des retours.
 - **Niveaux** : les passages de niveau sont annoncés **en message privé** (jamais dans un salon), suivis d'un MP par grade débloqué. Si le membre a fermé ses MP, l'annonce est simplement ignorée — les rôles récompense sont attribués dans tous les cas. Modèle personnalisable : `/config niveaux message` (`{user}`, `{level}`, `{server}`).
 - **Renommages** : Discord limite à 2 renommages / 10 min / salon — d'où l'actualisation des compteurs toutes les 6 min (et la même limite sur `/voc renommer`).
 - **Statut du bot** : « Joue à play.clovergames.fr », réglable via `BOT_ACTIVITY_NAME` / `BOT_ACTIVITY_TYPE` dans `.env`. Déclaré à la connexion, donc conservé après une reconnexion gateway.
 - Le bot ne peut pas renommer le **propriétaire du serveur** (limite Discord).
-- **Phase 2 prévue** : liaison par code in-game (`/link` en jeu → `/lier` sur Discord) — nécessite le module `discordlink` dans le plugin clover-core.
+- **Liaison par code in-game** : `/lier` en jeu affiche un code, `/lier code:XXXX` sur Discord le consomme (pseudo + rôle lié appliqués aussitôt, `/delier` pour retirer). Nécessite les variables `MINECRAFT_DB_*` ; la liaison faite sur le site est répercutée en ~1 min.

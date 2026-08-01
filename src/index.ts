@@ -1,6 +1,6 @@
 import { CloverClient } from "./client";
 import { commands } from "./commands";
-import { componentHandlers } from "./components";
+import { componentHandlers, dmComponentHandlers } from "./components";
 import { env } from "./config";
 import { pool } from "./db";
 import { events } from "./events";
@@ -14,6 +14,9 @@ for (const command of commands) {
 }
 for (const [prefix, handler] of Object.entries(componentHandlers)) {
   client.components.set(prefix, handler);
+}
+for (const [prefix, handler] of Object.entries(dmComponentHandlers)) {
+  client.dmComponents.set(prefix, handler);
 }
 for (const event of events) {
   const listener = (...args: unknown[]) =>

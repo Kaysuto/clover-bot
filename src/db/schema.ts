@@ -30,6 +30,18 @@ export const botGuildConfig = pgTable("bot_guild_config", {
     .notNull()
     .default(sql`'{}'::text[]`),
 
+  // Accueil et départ (messages privés)
+  welcomeDmEnabled: boolean("welcome_dm_enabled").notNull().default(true),
+  /**
+   * Modèle du MP de bienvenue. `null` = message par défaut du code
+   * (`DEFAULT_WELCOME_MESSAGE`) : une amélioration de la formulation profite
+   * ainsi à toutes les guildes qui n'ont rien personnalisé.
+   */
+  welcomeDmMessage: text("welcome_dm_message"),
+  leaveSurveyEnabled: boolean("leave_survey_enabled").notNull().default(true),
+  /** Salon des retours de départ ; à défaut, le salon de logs par défaut. */
+  leaveFeedbackChannelId: text("leave_feedback_channel_id"),
+
   // Synchronisation Discord ↔ Minecraft
   linkedRoleId: text("linked_role_id"),
   syncNicknames: boolean("sync_nicknames").notNull().default(true),
@@ -228,6 +240,36 @@ export const botTickets = pgTable(
     closedAt: timestamp("closed_at"),
   },
   (t) => [index("bot_tickets_opener_idx").on(t.guildId, t.openerId, t.status)],
+);
+
+// ─── Retours de départ ───────────────────────────────────────────────────────
+
+/**
+ * Un membre part → une ligne, créée au moment de l'envoi du sondage privé.
+ * La ligne existe même sans réponse : c'est ce qui permet de connaître le taux
+ * de réponse (`status`) et de ne pas surestimer la représentativité des retours.
+ */
+export const botLeaveFeedback = pgTable(
+  "bot_leave_feedback",
+  {
+    id: serial("id").primaryKey(),
+    guildId: text("guild_id").notNull(),
+    userId: text("user_id").notNull(),
+    /** Pseudo au moment du départ : le membre n'est plus consultable après coup. */
+    username: text("username").notNull(),
+    /** SENT | ANSWERED | DECLINED | UNREACHABLE (MP fermés) */
+    status: text("status").notNull().default("SENT"),
+    /** Clé de LEAVE_REASONS, null tant que le départ n'est pas expliqué. */
+    reason: text("reason"),
+    comment: text("comment"),
+    /** Temps passé sur le serveur, en millisecondes. */
+    membershipMs: bigint("membership_ms", { mode: "number" }),
+    /** Message publié côté staff, réédité si un commentaire arrive ensuite. */
+    staffMessageId: text("staff_message_id"),
+    leftAt: timestamp("left_at").notNull().defaultNow(),
+    answeredAt: timestamp("answered_at"),
+  },
+  (t) => [index("bot_leave_feedback_guild_idx").on(t.guildId, t.leftAt.desc())],
 );
 
 // ─── Vocaux temporaires ──────────────────────────────────────────────────────

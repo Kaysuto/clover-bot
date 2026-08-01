@@ -1,4 +1,4 @@
-import { pgTable, text } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 /**
  * Miroir minimal et STRICTEMENT LECTURE SEULE de la table `users_meta` du
@@ -14,4 +14,5 @@ export const usersMeta = pgTable("users_meta", {
   minecraftUuid: text("minecraft_uuid"),
   minecraftUsername: text("minecraft_username"),
   discordId: text("discord_id"),
+  updatedAt: timestamp("updated_at"),
 });
