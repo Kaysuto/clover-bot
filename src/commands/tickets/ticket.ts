@@ -80,7 +80,7 @@ const ticket: Command = {
         });
         return;
       }
-      const panel = await channel.send(buildTicketPanel(client));
+      const panel = await channel.send(buildTicketPanel());
       await updateGuildConfig(interaction.guildId, {
         ticketPanelChannelId: channel.id,
         ticketPanelMessageId: panel.id,
