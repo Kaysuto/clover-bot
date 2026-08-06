@@ -96,12 +96,8 @@ export function canManageTicket(
 }
 
 /** Panneau publié par /ticket setup. */
-export function buildTicketPanel(client: CloverClient) {
+export function buildTicketPanel() {
   const embed = brandEmbed()
-    .setAuthor({
-      name: "Clover Games · Support",
-      iconURL: client.user?.displayAvatarURL({ size: 128 }),
-    })
     .setTitle("🎫 Ouvrir un ticket")
     .setDescription(
       [
@@ -173,7 +169,7 @@ export const handleTicketComponent: ComponentHandler = async (
       // la modale — d'où l'édition directe du message).
       if (interaction.isStringSelectMenu()) {
         await interaction.message
-          .edit(buildTicketPanel(client))
+          .edit(buildTicketPanel())
           .catch((err) =>
             logger.debug({ err }, "Réinitialisation du menu de tickets impossible"),
           );
@@ -607,7 +603,7 @@ export async function refreshTicketPanels(client: CloverClient): Promise<void> {
     }
 
     await message
-      .edit(buildTicketPanel(client))
+      .edit(buildTicketPanel())
       .catch((err) => logger.warn({ err }, "Actualisation du panneau de tickets impossible"));
   }
 }
