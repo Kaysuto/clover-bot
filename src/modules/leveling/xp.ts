@@ -5,6 +5,8 @@ import { getGuildConfig, type GuildConfig } from "../../db/guild-config";
 import { botLevels } from "../../db/schema";
 import { brandEmbed } from "../../lib/embeds";
 import { logger } from "../../lib/logger";
+import { rconBroadcast } from "../../lib/rcon";
+import { getLinkedAccount } from "../sync/manager";
 import { levelFromXp } from "./formula";
 import { applyLevelRoles } from "./rewards";
 
@@ -150,10 +152,29 @@ async function announceLevelUp(
   await sendDm(member, content);
 
   // Rôles récompense : un message privé par grade obtenu
-  for (const { role, level } of await applyLevelRoles(member, newLevel)) {
+  const granted = await applyLevelRoles(member, newLevel);
+  if (!granted.length) return;
+
+  // Récompense in-game : une seule résolution du compte lié pour tous les grades.
+  const rewards = granted.filter((g) => g.rconCommand);
+  const linked = rewards.length ? await getLinkedAccount(userId).catch(() => null) : null;
+
+  for (const { role, level, rconCommand } of granted) {
+    let extra = "";
+    if (rconCommand && linked) {
+      const done = await rconBroadcast(
+        rconCommand.replaceAll("{player}", linked.minecraftUsername),
+      ).catch((err) => {
+        logger.warn({ err, userId, level }, "Récompense in-game impossible");
+        return [] as string[];
+      });
+      if (done.length) extra = `\n🎁 Récompense envoyée en jeu à \`${linked.minecraftUsername}\`.`;
+    } else if (rconCommand && !linked) {
+      extra = "\n🎁 Une récompense en jeu t'attend : lie ton compte avec `/lier`.";
+    }
     await sendDm(
       member,
-      `🏅 Nouveau grade débloqué : **${role.name}** (niveau **${level}**) !`,
+      `🏅 Nouveau grade débloqué : **${role.name}** (niveau **${level}**) !${extra}`,
     );
   }
 }

@@ -1,4 +1,5 @@
 import type {
+  AutocompleteInteraction,
   Awaitable,
   ChatInputCommandInteraction,
   ClientEvents,
@@ -17,6 +18,15 @@ export interface Command {
     | SlashCommandSubcommandsOnlyBuilder;
   execute(
     interaction: ChatInputCommandInteraction<"cached">,
+    client: CloverClient,
+  ): Promise<void>;
+  /**
+   * Complétion des options `setAutocomplete(true)`. Les listes dynamiques
+   * (serveurs du réseau, grades…) ne peuvent pas passer par `addChoices`,
+   * qui est figé au déploiement de la commande.
+   */
+  autocomplete?(
+    interaction: AutocompleteInteraction<"cached">,
     client: CloverClient,
   ): Promise<void>;
 }

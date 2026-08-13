@@ -2,17 +2,23 @@ import { syncGuildCommands } from "../lib/command-sync";
 import { touchHeartbeat } from "../lib/heartbeat";
 import { logger } from "../lib/logger";
 import { registerJob } from "../lib/scheduler";
+import { seedServers } from "../lib/servers";
+import { refreshApplicationPanels } from "../modules/applications/manager";
 import { tickGiveaways } from "../modules/giveaways/manager";
 import { syncGuildInvites } from "../modules/invites/cache";
 import { tickVoiceXp } from "../modules/leveling/voice-xp";
 import { pruneXpCooldowns } from "../modules/leveling/xp";
 import { tickMcCounter } from "../modules/mc-counter/job";
 import { tickMemberCounter } from "../modules/member-counter/job";
+import { tickSanctions } from "../modules/moderation/sanctions";
+import { tickRankSync } from "../modules/ranks/sync";
 import { tickStatus } from "../modules/status/monitor";
 import { tickSiteLinksDelta } from "../modules/sync/delta";
 import { syncGuild } from "../modules/sync/manager";
 import { cleanupTempVoice } from "../modules/tempvoice/manager";
 import { reconcileTickets, refreshTicketPanels } from "../modules/tickets/manager";
+import { tickVoteRoles } from "../modules/vote/manager";
+import { startVoteServer } from "../modules/vote/server";
 import type { EventHandler } from "../types";
 
 const ready: EventHandler<"clientReady"> = {
@@ -20,6 +26,11 @@ const ready: EventHandler<"clientReady"> = {
   once: true,
   async execute(client) {
     logger.info(`✅ Connecté en tant que ${client.user?.tag}`);
+
+    // Registre des serveurs du réseau : semé une fois, modifiable par /reseau.
+    await seedServers().catch((err) =>
+      logger.error({ err }, "Enregistrement des serveurs du réseau impossible"),
+    );
 
     // Une commande ajoutée au code doit exister sur Discord sans étape manuelle.
     await syncGuildCommands(client).catch((err) =>
@@ -40,6 +51,9 @@ const ready: EventHandler<"clientReady"> = {
     );
     await refreshTicketPanels(client).catch((err) =>
       logger.error({ err }, "Actualisation des panneaux de tickets impossible"),
+    );
+    await refreshApplicationPanels(client).catch((err) =>
+      logger.error({ err }, "Actualisation des panneaux de candidatures impossible"),
     );
 
     // Jobs périodiques — tous relisent la DB, donc reprise automatique
@@ -83,6 +97,12 @@ const ready: EventHandler<"clientReady"> = {
       runOnStart: true,
     });
     registerJob({
+      name: "ranks-sync",
+      intervalMs: 6 * 3_600_000, // grades LuckPerms → rôles Discord
+      run: () => tickRankSync(client),
+      runOnStart: true,
+    });
+    registerJob({
       name: "site-links-delta",
       intervalMs: 60_000, // liaison faite sur le site → rôle/pseudo Discord en ~1 min
       run: () => tickSiteLinksDelta(client),
@@ -95,6 +115,17 @@ const ready: EventHandler<"clientReady"> = {
           await syncGuildInvites(guild);
         }
       },
+    });
+    registerJob({
+      name: "vote-roles",
+      intervalMs: 5 * 60_000, // retrait des rôles « votant » échus
+      run: () => tickVoteRoles(client),
+    });
+    registerJob({
+      name: "sanctions-expiry",
+      intervalMs: 60_000, // relit la base : les échéances passées hors ligne sont rattrapées
+      run: () => tickSanctions(client),
+      runOnStart: true,
     });
     registerJob({
       name: "heartbeat",
@@ -112,6 +143,10 @@ const ready: EventHandler<"clientReady"> = {
         if (removed) logger.debug({ removed }, "Cooldowns XP purgés");
       },
     });
+
+    // Réception des votes : n'ouvre un port que si VOTE_HTTP_PORT et VOTE_TOKEN
+    // sont renseignés (cf. modules/vote/server.ts).
+    startVoteServer(client);
 
     logger.info("🍀 Clover Bot prêt !");
   },

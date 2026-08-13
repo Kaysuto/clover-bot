@@ -1,15 +1,18 @@
 import { type Client, type EmbedBuilder, WebhookClient } from "discord.js";
 import type { CloverClient } from "../../client";
-import { env, rconConfigured } from "../../config";
+import { env } from "../../config";
 import { getGuildConfig, updateGuildConfig } from "../../db/guild-config";
 import { BRAND_COLOR, ERROR_COLOR, WARN_COLOR, brandEmbed } from "../../lib/embeds";
 import { logger } from "../../lib/logger";
-import { getMcStatus } from "../../lib/mc-status";
+import { getMcStatus, getServerStatus } from "../../lib/mc-status";
 import { rconHealthCheck } from "../../lib/rcon";
+import { getServers, serverAddress } from "../../lib/servers";
 
 type Health = "up" | "down" | "unknown";
 
 interface ServiceState {
+  /** Libellé affiché en titre de colonne. */
+  label: string;
   consecutiveFails: number;
   effective: Health;
   /** État court affiché en gras : « En ligne », « Injoignable »… */
@@ -27,17 +30,18 @@ const WEBSITE_HOST = (() => {
   }
 })();
 
-const MC_ADDRESS =
-  env.MC_PORT === 25565 ? env.MC_HOST : `${env.MC_HOST}:${env.MC_PORT}`;
-
 /** Anti-flap : 2 échecs consécutifs avant de déclarer un service hors ligne. */
 const FAIL_THRESHOLD = 2;
 
-const states: Record<"website" | "minecraft" | "rcon", ServiceState> = {
-  website: { consecutiveFails: 0, effective: "unknown", detail: "" },
-  minecraft: { consecutiveFails: 0, effective: "unknown", detail: "" },
-  rcon: { consecutiveFails: 0, effective: "unknown", detail: "" },
-};
+/**
+ * États indexés par clé de service : `website`, puis un `mc:<clé>` par serveur
+ * du réseau. La table se remplit toute seule au premier tick — un serveur
+ * ajouté par `/config serveurs` apparaît sans redémarrage.
+ */
+const states = new Map<string, ServiceState>();
+
+/** Dernier état RCON connu par serveur (rafraîchi toutes les 5 min). */
+const rconDetails = new Map<string, string | null>();
 
 let tickCount = 0;
 
@@ -58,13 +62,21 @@ async function checkWebsite(): Promise<boolean> {
 }
 
 function updateState(
-  name: keyof typeof states,
+  key: string,
+  label: string,
   ok: boolean,
   detail: string,
   extra?: string,
 ): void {
-  const state = states[name];
+  const state = states.get(key) ?? {
+    label,
+    consecutiveFails: 0,
+    effective: "unknown" as Health,
+    detail: "",
+  };
   const previous = state.effective;
+
+  state.label = label;
   if (ok) {
     state.consecutiveFails = 0;
     state.effective = "up";
@@ -74,31 +86,40 @@ function updateState(
   }
   state.detail = detail;
   state.extra = extra;
+  states.set(key, state);
 
-  if (previous === "up" && state.effective === "down") {
-    void alertDown(name);
-  }
+  if (previous === "up" && state.effective === "down") void alertDown(state.label);
+  if (previous === "down" && state.effective === "up") void alertUp(state.label);
 }
 
-const SERVICE_LABELS: Record<keyof typeof states, string> = {
-  website: "🌐 Site web",
-  minecraft: "🎮 Serveur Minecraft",
-  rcon: "🛠️ RCON",
-};
+async function alertDown(label: string): Promise<void> {
+  logger.warn({ service: label }, "Service passé HORS LIGNE");
+  await sendAlert(
+    ERROR_COLOR,
+    "🚨 Alerte service",
+    `**${label}** vient de passer **hors ligne**.`,
+  );
+}
 
-async function alertDown(name: keyof typeof states): Promise<void> {
-  logger.warn({ service: name }, "Service passé HORS LIGNE");
+async function alertUp(label: string): Promise<void> {
+  logger.info({ service: label }, "Service rétabli");
+  await sendAlert(
+    BRAND_COLOR,
+    "✅ Service rétabli",
+    `**${label}** répond de nouveau.`,
+  );
+}
+
+async function sendAlert(
+  color: number,
+  title: string,
+  description: string,
+): Promise<void> {
   if (!webhook) return;
   await webhook
     .send({
       embeds: [
-        brandEmbed()
-          .setColor(ERROR_COLOR)
-          .setTitle("🚨 Alerte service")
-          .setDescription(
-            `**${SERVICE_LABELS[name]}** vient de passer **hors ligne**.`,
-          )
-          .setTimestamp(),
+        brandEmbed().setColor(color).setTitle(title).setDescription(description).setTimestamp(),
       ],
     })
     .catch((err) => logger.warn({ err }, "Envoi de l'alerte webhook impossible"));
@@ -110,23 +131,20 @@ function statusIcon(state: ServiceState): string {
   return "🟡";
 }
 
-/** Services réellement surveillés (RCON est facultatif). */
-function monitoredStates(): ServiceState[] {
-  return rconConfigured
-    ? [states.website, states.minecraft, states.rcon]
-    : [states.website, states.minecraft];
-}
-
 /** Bandeau de synthèse : une phrase + la couleur de l'embed. */
 function summarize(): { line: string; color: number } {
-  const monitored = monitoredStates();
-  const down = monitored.filter((s) => s.effective === "down").length;
-  if (down > 0) {
+  const monitored = [...states.values()];
+  if (!monitored.length) {
+    return { line: "🟡 **Vérification en cours…**", color: WARN_COLOR };
+  }
+
+  const down = monitored.filter((s) => s.effective === "down");
+  if (down.length) {
     return {
       line:
-        down === 1
-          ? "🔴 **Incident en cours** — un service est indisponible"
-          : `🔴 **Incident en cours** — ${down} services sont indisponibles`,
+        down.length === 1
+          ? `🔴 **Incident en cours** — ${down[0]!.label} est indisponible`
+          : `🔴 **Incident en cours** — ${down.length} services sont indisponibles`,
       color: ERROR_COLOR,
     };
   }
@@ -140,19 +158,16 @@ function summarize(): { line: string; color: number } {
 }
 
 /** Une colonne du tableau de bord (3 par ligne grâce à `inline`). */
-function serviceField(name: keyof typeof states) {
-  const state = states[name];
-  const value = [
-    `${statusIcon(state)} **${state.detail || "Vérification…"}**`,
-    state.extra,
-  ]
+function serviceField(state: ServiceState) {
+  const value = [`${statusIcon(state)} **${state.detail || "Vérification…"}**`, state.extra]
     .filter(Boolean)
     .join("\n");
-  return { name: SERVICE_LABELS[name], value, inline: true };
+  return { name: state.label, value, inline: true };
 }
 
 export function buildStatusEmbed(client: Client): EmbedBuilder {
   const { line, color } = summarize();
+  const fields = [...states.values()].map(serviceField);
 
   const embed = brandEmbed()
     .setColor(color)
@@ -163,16 +178,11 @@ export function buildStatusEmbed(client: Client): EmbedBuilder {
     })
     .setTitle("📊 État des services")
     .setDescription(`> ${line}`)
-    .addFields(
-      serviceField("website"),
-      serviceField("minecraft"),
-      rconConfigured
-        ? serviceField("rcon")
-        : { name: SERVICE_LABELS.rcon, value: "⚪ **Non configuré**", inline: true },
-    )
     .setFooter({ text: "Actualisation automatique toutes les 60 s" })
     .setTimestamp();
 
+  // Discord plafonne à 25 champs ; le réseau en a 7, la garde est de principe.
+  if (fields.length) embed.addFields(fields.slice(0, 25));
   return embed;
 }
 
@@ -183,25 +193,60 @@ export async function tickStatus(client: CloverClient): Promise<void> {
   const websiteOk = await checkWebsite();
   updateState(
     "website",
+    "🌐 Site web",
     websiteOk,
     websiteOk ? "En ligne" : "Injoignable",
     `[${WEBSITE_HOST}](${env.WEBSITE_URL})`,
   );
 
-  const mc = await getMcStatus(true);
-  updateState(
-    "minecraft",
-    mc.online,
-    mc.online ? "En ligne" : "Hors ligne",
-    mc.online
-      ? `👥 **${mc.players}** / ${mc.maxPlayers} joueurs\n\`${MC_ADDRESS}\``
-      : `\`${MC_ADDRESS}\``,
-  );
+  // RCON : vérification plus lourde, une fois sur cinq seulement (5 min).
+  const checkRcon = tickCount % 5 === 1;
 
-  // RCON : vérification légère toutes les 5 min seulement
-  if (rconConfigured && tickCount % 5 === 1) {
-    const rcon = await rconHealthCheck();
-    updateState("rcon", rcon.ok, rcon.ok ? "Opérationnel" : "Injoignable");
+  const servers = await getServers().catch((err) => {
+    logger.warn({ err }, "Registre des serveurs illisible");
+    return [];
+  });
+
+  // Registre vide (migration pas encore appliquée) : on retombe sur l'adresse
+  // publique du .env plutôt que d'afficher un tableau de bord amputé.
+  if (!servers.length) {
+    const mc = await getMcStatus(true);
+    updateState(
+      "mc:default",
+      "🎮 Serveur Minecraft",
+      mc.online,
+      mc.online ? "En ligne" : "Hors ligne",
+      mc.online
+        ? `👥 **${mc.players}** / ${mc.maxPlayers} joueurs\n\`${env.MC_HOST}\``
+        : `\`${env.MC_HOST}\``,
+    );
+    await refreshStatusMessages(client);
+    return;
+  }
+
+  for (const server of servers) {
+    const mc = await getServerStatus(server, true);
+    const lines: string[] = [];
+    if (mc.online) lines.push(`👥 **${mc.players}** / ${mc.maxPlayers} joueurs`);
+    lines.push(`\`${serverAddress(server)}\``);
+
+    if (checkRcon) {
+      const rcon = await rconHealthCheck(server.key);
+      rconDetails.set(
+        server.key,
+        rcon.configured ? (rcon.ok ? "🛠️ RCON ok" : "🛠️ RCON injoignable") : null,
+      );
+    }
+    const rconLine = rconDetails.get(server.key);
+    if (rconLine) lines.push(rconLine);
+
+    updateState(
+      `mc:${server.key}`,
+      `${server.emoji} ${server.label}`,
+      mc.online,
+      mc.online ? "En ligne" : "Hors ligne",
+      lines.join("\n"),
+    );
   }
 
   await refreshStatusMessages(client);
@@ -233,12 +278,10 @@ async function refreshStatusMessages(client: CloverClient): Promise<void> {
     }
 
     // Message absent (première fois ou supprimé) → on le recrée
-    const sent = await channel
-      .send({ embeds: [embed] })
-      .catch((err) => {
-        logger.warn({ err }, "Envoi du message de statut impossible");
-        return null;
-      });
+    const sent = await channel.send({ embeds: [embed] }).catch((err) => {
+      logger.warn({ err }, "Envoi du message de statut impossible");
+      return null;
+    });
     if (sent) {
       await updateGuildConfig(guild.id, { statusMessageId: sent.id });
     }
