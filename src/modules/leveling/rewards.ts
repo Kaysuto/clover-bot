@@ -8,6 +8,8 @@ import { logger } from "../../lib/logger";
 export interface GrantedLevelRole {
   role: Role;
   level: number;
+  /** Commande console à lancer en jeu, si une récompense y est associée. */
+  rconCommand: string | null;
 }
 
 /**
@@ -30,7 +32,7 @@ export async function applyLevelRoles(
   const granted = rows.flatMap<GrantedLevelRole>((row) => {
     const role = member.guild.roles.cache.get(row.roleId);
     if (!role || member.roles.cache.has(role.id)) return [];
-    return [{ role, level: row.level }];
+    return [{ role, level: row.level, rconCommand: row.rconCommand }];
   });
   if (!granted.length) return [];
 

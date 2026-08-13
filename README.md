@@ -13,7 +13,15 @@ Bot Discord officiel du réseau **Clover Games** (`clovergames.fr` · `play.clov
 | 🎮 Compteur de joueurs | `/config compteur joueurs-creer` | Salon vocal affichant le nombre de joueurs Minecraft en ligne (actualisé toutes les 6 min) |
 | 👥 Compteur de membres | `/config compteur membres-creer` | Salon vocal affichant le nombre de membres du Discord, **bots exclus** |
 | 🔊 Vocaux temporaires | `/voc …` | Rejoins « ➕ Créer ton vocal » → vocal + salon texte privé, verrouillage, limite, transfert… |
-| 📊 Statut des services | `/statut` | Embed auto-actualisé (site web, serveur Minecraft, RCON) + alerte webhook en cas de panne |
+| 📊 Statut des services | `/statut [serveur]` | Embed auto-actualisé : site web + **un bloc par serveur du réseau** (joueurs, adresse, RCON) et alerte webhook aux transitions |
+| 🌐 Réseau | `/reseau liste\|ajouter\|modifier\|supprimer\|compteur` | Registre des serveurs (Lobby, PvP Soup, SkyPvP, Practice, Créatif, BedWars) : ping, RCON dédié, compteur vocal par serveur |
+| 🔨 Modération | `/sanction avertir\|muter\|expulser\|bannir\|lever`, `/casier` | Historique complet, mutes et bans temporaires levés automatiquement, **répercussion sur les serveurs Minecraft** quand le compte est lié |
+| 🧑 Fiche joueur | `/joueur` | Résolution croisée Discord ↔ Minecraft : niveau, sanctions, grades en jeu, dernier vote |
+| 🏅 Grades | `/config grades …` | Groupes LuckPerms reflétés en rôles Discord (lecture seule de la base LuckPerms) |
+| 🗳️ Votes | `/votes` | Endpoint HTTP pour les listes de serveurs : rôle temporaire, récompense en jeu, classement du mois |
+| 💎 Boosts | `/config boosts …` | Remerciement public du booster et récompense in-game |
+| 💡 Suggestions | `/suggestion` | Vote 👍/👎 par bouton, décision du staff en modale, auteur prévenu en MP |
+| 📝 Candidatures | `/config candidatures …` | Panneau de recrutement, formulaire par poste, décision du staff et réponse en MP |
 | 🎫 Tickets | `/ticket setup\|add\|remove\|close` | Panneau à boutons, salons privés, transcript HTML archivé à la fermeture |
 | 👋 Accueil & départ | `/config accueil …` | MP de bienvenue à l'arrivée, sondage privé « pourquoi es-tu parti ? » au départ, retours publiés côté staff + statistiques |
 | 📋 Logs | `/config logs salon\|categorie\|voir` | Arrivées/départs, profils, modération, vocal, salons & rôles — 4 catégories activables, salon dédié possible par catégorie |
@@ -62,7 +70,17 @@ npm run dev             # démarre en mode développement
 /config logs salon salon:#logs
 /config accueil depart-salon salon:#retours-depart
 /config niveaux recompense niveau:5 role:@Actif
+/config moderation propagation actif:true
+/config suggestions salon salon:#suggestions
+/config candidatures salon-staff salon:#candidatures
+/config candidatures panneau salon:#recrutement
+/config candidatures ouvrir actif:true
+/config votes salon salon:#votes
+/config boosts salon salon:#boosts
+/reseau liste
 ```
+
+> ℹ️ Les six serveurs du réseau sont enregistrés au premier démarrage. Chacun n'a un RCON opérationnel (statut, sanctions, récompenses) qu'une fois son mot de passe renseigné dans `RCON_PASSWORD_<CLE>` — `/reseau liste` indique lesquels manquent.
 
 ## Production (VPS + Docker)
 
@@ -90,3 +108,7 @@ docker compose logs -f bot
 - **Statut du bot** : « Joue à play.clovergames.fr », réglable via `BOT_ACTIVITY_NAME` / `BOT_ACTIVITY_TYPE` dans `.env`. Déclaré à la connexion, donc conservé après une reconnexion gateway.
 - Le bot ne peut pas renommer le **propriétaire du serveur** (limite Discord).
 - **Liaison par code in-game** : `/lier` en jeu affiche un code, `/lier code:XXXX` sur Discord le consomme (pseudo + rôle lié appliqués aussitôt, `/delier` pour retirer). Nécessite les variables `MINECRAFT_DB_*` ; la liaison faite sur le site est répercutée en ~1 min.
+- **Serveurs du réseau** : hôte, port et allocation RCON vivent en base (`/reseau modifier`), les **mots de passe RCON restent dans le `.env`** sous `RCON_PASSWORD_<CLE>` — la base est partagée avec le site. Un serveur sans mot de passe est pingé (statut, compteur) mais n'accepte ni sanction ni récompense.
+- **Modération** : `/sanction` historise tout dans `bot_sanctions`, y compris les levées — `/casier` montre l'historique complet. Les mutes courts utilisent le **timeout natif** (il survit à l'arrêt du bot) ; au-delà de 28 jours ou si le timeout est refusé, le rôle de `/config moderation role-muet` prend le relais. La propagation en jeu est **désactivée par défaut** et diffuse la commande à tous les serveurs dont le RCON répond ; les commandes par défaut sont vanilla (`ban`, `pardon`, `kick`) et se redéfinissent avec `/config moderation commande` si un plugin de sanctions est installé.
+- **Votes** : l'endpoint n'écoute que si `VOTE_HTTP_PORT` **et** `VOTE_TOKEN` sont renseignés. Les listes de serveurs appellent `POST` ou `GET /vote` avec le jeton (en-tête `X-Vote-Token` ou paramètre `token`) et le pseudo (`username`, `player`, `pseudo`…). Le vote d'un joueur non lié est historisé quand même : il comptera dès la liaison. ⚠️ `network_mode: host` oblige à n'ouvrir ce port que vers les IP des listes de serveurs.
+- **Grades LuckPerms** : lecture seule d'une base **distincte** de celle du plugin (`LUCKPERMS_DB_*`). Seuls les rôles déclarés par `/config grades lier` sont ajoutés ou retirés — un rôle donné à la main hors de cette table n'est jamais touché.

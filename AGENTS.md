@@ -13,6 +13,11 @@ Bot Discord officiel du réseau Clover Games. Dépôt git indépendant au sein d
 - **La config de guilde est en cache mémoire** (`db/guild-config.ts`, TTL 60 s) : elle est lue à chaque message, chaque log et chaque tick de job. Toute écriture dans `bot_guild_config` passe par `updateGuildConfig`, ou appelle `invalidateGuildConfig` juste après (cas de l'incrément atomique du compteur de tickets). Même règle pour `bot_log_settings` via `setLogSetting`.
 - **Les logs ne doivent jamais faire échouer un événement** : `sendLog` avale ses erreurs, et chaque appel depuis `events/` est suffixé d'un `.catch()`. Toute nouvelle catégorie s'ajoute dans `modules/logs/channel.ts` (`LOG_CATEGORIES`), le reste suit.
 
+- **Les serveurs du réseau vivent en base, les mots de passe RCON dans le `.env`** : `bot_servers` (sans `guild_id` : elle décrit le réseau, pas la guilde) porte hôte, port et allocation RCON ; le mot de passe se lit dans `RCON_PASSWORD_<CLE>`, jamais en base — elle est partagée avec le site. `seedServers()` crée les six serveurs au démarrage, `/reseau` les modifie ensuite.
+- **Une sanction est répercutée en jeu par des commandes configurables** : les défauts (`ban`, `pardon`, `kick`…) sont vanilla ; un plugin de sanctions impose de les redéfinir avec `/config moderation commande`. La propagation est diffusée à TOUS les serveurs dont le RCON répond (`rconBroadcast`) — un bannissement qui ne couvre que le lobby ne vaut rien.
+- **LuckPerms est lu dans sa propre base** (`LUCKPERMS_DB_*`, `lib/lp-db.ts`), jamais via `mc-db.ts` : la base du plugin clover-core reste limitée aux tables du module `link`.
+- **L'endpoint de vote est un port public** : il ne s'ouvre que si `VOTE_HTTP_PORT` **et** `VOTE_TOKEN` sont définis, le jeton est comparé en temps constant et c'est la seule protection. Ne jamais y ajouter de route qui écrit sans ce contrôle.
+
 ## Architecture
 
 ```
@@ -24,11 +29,13 @@ src/
 ├─ components.ts       routage des customId "prefix:action:args" par préfixe
 ├─ commands/<domaine>/ commandes slash (1 fichier = 1 commande)
 ├─ events/             1 fichier = 1 événement gateway, logique déléguée aux modules
-├─ modules/<feature>/  logique métier (leveling, giveaways, invites, logs, sync,
-│                      mc-counter, status, tempvoice, tickets, welcome)
+├─ modules/<feature>/  logique métier (applications, boost, giveaways, invites,
+│                      leveling, logs, moderation, mc-counter, ranks, status,
+│                      suggestions, sync, tempvoice, tickets, vote, welcome)
 ├─ db/                 schema.ts (tables bot_*), site-schema.ts (miroir RO),
-│                      guild-config.ts (helper), index.ts (pool pg + drizzle)
-└─ lib/                logger, scheduler, mc-status, rcon, embeds, ids, duration
+│                      guild-config.ts (helper + cache), index.ts (pool pg + drizzle)
+└─ lib/                logger, scheduler, servers, mc-status, rcon, lp-db,
+                       heartbeat, embeds, ids, duration
 ```
 
 ## Commandes utiles

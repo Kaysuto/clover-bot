@@ -76,6 +76,49 @@ export const botGuildConfig = pgTable("bot_guild_config", {
 
   logChannelId: text("log_channel_id"),
 
+  // Modération
+  /** Rôle appliqué par `/sanction muter` quand le timeout Discord ne suffit pas. */
+  muteRoleId: text("mute_role_id"),
+  /** Répercuter bannissements et mutes sur le serveur Minecraft (compte lié). */
+  sanctionPropagateMc: boolean("sanction_propagate_mc").notNull().default(false),
+  /**
+   * Commandes console de propagation. Les défauts sont les commandes vanilla,
+   * valables sur n'importe quel serveur ; `{player}`, `{reason}` et
+   * `{duration}` y sont remplacés. À adapter si un plugin de sanctions
+   * (LiteBans, AdvancedBan…) est installé.
+   */
+  mcBanCommand: text("mc_ban_command").notNull().default("ban {player} {reason}"),
+  mcUnbanCommand: text("mc_unban_command").notNull().default("pardon {player}"),
+  mcKickCommand: text("mc_kick_command").notNull().default("kick {player} {reason}"),
+  mcMuteCommand: text("mc_mute_command").notNull().default("mute {player} {duration}"),
+  mcUnmuteCommand: text("mc_unmute_command").notNull().default("unmute {player}"),
+
+  // Grades Minecraft → rôles Discord
+  rankSyncEnabled: boolean("rank_sync_enabled").notNull().default(false),
+
+  // Votes (listes de serveurs)
+  voteChannelId: text("vote_channel_id"),
+  voteRoleId: text("vote_role_id"),
+  voteRoleHours: integer("vote_role_hours").notNull().default(24),
+  /** Commande console lancée à chaque vote ; `{player}` est remplacé. */
+  voteRconCommand: text("vote_rcon_command"),
+
+  // Boosts Nitro
+  boostChannelId: text("boost_channel_id"),
+  boostMessage: text("boost_message"),
+  /** Récompense in-game du boost ; `{player}` est remplacé. */
+  boostRconCommand: text("boost_rcon_command"),
+
+  // Suggestions
+  suggestionChannelId: text("suggestion_channel_id"),
+
+  // Candidatures staff
+  applicationPanelChannelId: text("application_panel_channel_id"),
+  applicationPanelMessageId: text("application_panel_message_id"),
+  /** Salon où le staff reçoit et décide des candidatures. */
+  applicationReviewChannelId: text("application_review_channel_id"),
+  applicationsOpen: boolean("applications_open").notNull().default(false),
+
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -106,6 +149,8 @@ export const botLevelRoles = pgTable(
     guildId: text("guild_id").notNull(),
     level: integer("level").notNull(),
     roleId: text("role_id").notNull(),
+    /** Récompense in-game facultative ; `{player}` remplacé par le pseudo MC. */
+    rconCommand: text("rcon_command"),
   },
   (t) => [uniqueIndex("bot_level_roles_guild_level_idx").on(t.guildId, t.level)],
 );
@@ -300,3 +345,188 @@ export const botMinecraftLinks = pgTable("bot_minecraft_links", {
   source: text("source").notNull().default("CODE"),
   linkedAt: timestamp("linked_at").notNull().defaultNow(),
 });
+
+// ─── Serveurs du réseau ─────────────────────────────────────────────────────
+
+/**
+ * Serveurs Minecraft du réseau. Table sans `guild_id` : elle décrit le réseau,
+ * pas un serveur Discord. Le mot de passe RCON n'y figure volontairement PAS —
+ * il vit dans le `.env` sous `RCON_PASSWORD_<CLE>` (cf. `lib/servers.ts`), la
+ * base étant partagée avec le site.
+ */
+export const botServers = pgTable(
+  "bot_servers",
+  {
+    key: text("key").primaryKey(), // lobby, practice, pvpsoup…
+    label: text("label").notNull(),
+    emoji: text("emoji").notNull().default("🎮"),
+    /** Adresse pingée en SLP (peut être l'adresse publique du proxy). */
+    host: text("host").notNull(),
+    port: integer("port").notNull().default(25565),
+    rconHost: text("rcon_host"),
+    rconPort: integer("rcon_port"),
+    /** Serveur pris par défaut quand aucune clé n'est précisée (le lobby). */
+    isDefault: boolean("is_default").notNull().default(false),
+    enabled: boolean("enabled").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => [index("bot_servers_order_idx").on(t.enabled, t.sortOrder)],
+);
+
+/** Salon vocal compteur dédié à un serveur (le compteur global reste dans la config). */
+export const botServerCounters = pgTable(
+  "bot_server_counters",
+  {
+    guildId: text("guild_id").notNull(),
+    serverKey: text("server_key").notNull(),
+    channelId: text("channel_id").notNull(),
+    template: text("template").notNull().default("{emoji} {label} : {count}"),
+  },
+  (t) => [primaryKey({ columns: [t.guildId, t.serverKey] })],
+);
+
+// ─── Modération ─────────────────────────────────────────────────────────────
+
+/** Types de sanction (valeur stockée dans `bot_sanctions.type`). */
+export const SANCTION_TYPES = ["WARN", "MUTE", "KICK", "BAN"] as const;
+
+/**
+ * Historique des sanctions. Une ligne n'est jamais supprimée : la levée
+ * bascule `active` à false et renseigne `revoked_*`, pour que `/casier`
+ * garde la trace complète.
+ */
+export const botSanctions = pgTable(
+  "bot_sanctions",
+  {
+    id: serial("id").primaryKey(),
+    guildId: text("guild_id").notNull(),
+    userId: text("user_id").notNull(),
+    moderatorId: text("moderator_id").notNull(),
+    type: text("type").notNull(), // WARN | MUTE | KICK | BAN
+    reason: text("reason").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** null = définitive (bannissement/avertissement sans échéance). */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    active: boolean("active").notNull().default(true),
+    revokedBy: text("revoked_by"),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokeReason: text("revoke_reason"),
+    /** Pseudo Minecraft sanctionné en même temps, si le compte était lié. */
+    minecraftUsername: text("minecraft_username"),
+  },
+  (t) => [
+    index("bot_sanctions_user_idx").on(t.guildId, t.userId, t.createdAt.desc()),
+    index("bot_sanctions_due_idx").on(t.active, t.expiresAt),
+  ],
+);
+
+// ─── Grades Minecraft ↔ rôles Discord ───────────────────────────────────────
+
+/** Groupe LuckPerms → rôle Discord attribué aux comptes liés. */
+export const botRankRoles = pgTable(
+  "bot_rank_roles",
+  {
+    id: serial("id").primaryKey(),
+    guildId: text("guild_id").notNull(),
+    lpGroup: text("lp_group").notNull(), // nom du groupe LuckPerms
+    roleId: text("role_id").notNull(),
+  },
+  (t) => [uniqueIndex("bot_rank_roles_guild_group_idx").on(t.guildId, t.lpGroup)],
+);
+
+// ─── Votes ──────────────────────────────────────────────────────────────────
+
+/**
+ * Votes reçus des listes de serveurs (endpoint HTTP, cf. `modules/vote`).
+ * `discord_id` est résolu depuis la liaison quand elle existe ; un vote d'un
+ * joueur non lié est quand même historisé.
+ */
+export const botVotes = pgTable(
+  "bot_votes",
+  {
+    id: serial("id").primaryKey(),
+    site: text("site").notNull(),
+    minecraftUsername: text("minecraft_username").notNull(),
+    discordId: text("discord_id"),
+    votedAt: timestamp("voted_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Fin du rôle temporaire « Votant » ; null si aucun rôle attribué. */
+    roleExpiresAt: timestamp("role_expires_at", { withTimezone: true }),
+    roleRemoved: boolean("role_removed").notNull().default(false),
+  },
+  (t) => [
+    index("bot_votes_user_idx").on(t.minecraftUsername, t.votedAt.desc()),
+    index("bot_votes_role_due_idx").on(t.roleRemoved, t.roleExpiresAt),
+  ],
+);
+
+// ─── Suggestions ────────────────────────────────────────────────────────────
+
+export const SUGGESTION_STATUSES = [
+  "PENDING",
+  "ACCEPTED",
+  "REFUSED",
+  "DONE",
+] as const;
+
+export const botSuggestions = pgTable(
+  "bot_suggestions",
+  {
+    id: serial("id").primaryKey(),
+    guildId: text("guild_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    messageId: text("message_id").unique(),
+    authorId: text("author_id").notNull(),
+    content: text("content").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    decidedBy: text("decided_by"),
+    decisionReason: text("decision_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+  },
+  (t) => [index("bot_suggestions_guild_idx").on(t.guildId, t.createdAt.desc())],
+);
+
+/** Vote 👍/👎 : `value` vaut 1 ou -1, une seule ligne par membre. */
+export const botSuggestionVotes = pgTable(
+  "bot_suggestion_votes",
+  {
+    suggestionId: integer("suggestion_id")
+      .notNull()
+      .references(() => botSuggestions.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    value: integer("value").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.suggestionId, t.userId] })],
+);
+
+// ─── Candidatures staff ─────────────────────────────────────────────────────
+
+export const APPLICATION_STATUSES = ["PENDING", "ACCEPTED", "REFUSED"] as const;
+
+export const botApplications = pgTable(
+  "bot_applications",
+  {
+    id: serial("id").primaryKey(),
+    guildId: text("guild_id").notNull(),
+    userId: text("user_id").notNull(),
+    /** Poste visé (clé de `APPLICATION_POSITIONS`, cf. modules/applications). */
+    position: text("position").notNull(),
+    /** Réponses au formulaire, dans l'ordre des questions. */
+    answers: text("answers").array().notNull().default(sql`'{}'::text[]`),
+    status: text("status").notNull().default("PENDING"),
+    messageId: text("message_id"),
+    reviewedBy: text("reviewed_by"),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    decisionReason: text("decision_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("bot_applications_guild_idx").on(t.guildId, t.status, t.createdAt.desc()),
+  ],
+);

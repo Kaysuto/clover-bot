@@ -8,11 +8,18 @@ import {
   type VoiceChannel,
 } from "discord.js";
 import { and, eq } from "drizzle-orm";
+import type { CloverClient } from "../../client";
+import { env, luckPermsConfigured, voteEndpointConfigured } from "../../config";
 import { db } from "../../db";
 import { getGuildConfig, updateGuildConfig } from "../../db/guild-config";
-import { botLevelRoles } from "../../db/schema";
+import { botLevelRoles, botRankRoles } from "../../db/schema";
 import { brandEmbed, errorEmbed, successEmbed } from "../../lib/embeds";
 import { getMcStatus } from "../../lib/mc-status";
+import {
+  buildApplicationPanel,
+  refreshApplicationPanels,
+} from "../../modules/applications/manager";
+import { getRankRoles } from "../../modules/ranks/sync";
 import {
   getLogSettings,
   LOG_CATEGORIES,
@@ -132,6 +139,11 @@ const config: Command = {
             )
             .addRoleOption((o) =>
               o.setName("role").setDescription("Rôle récompense").setRequired(true),
+            )
+            .addStringOption((o) =>
+              o
+                .setName("commande")
+                .setDescription("Récompense en jeu, ex. crate give {player} niveau 1"),
             ),
         )
         .addSubcommand((s) =>
@@ -416,6 +428,234 @@ const config: Command = {
         .addSubcommand((s) =>
           s.setName("voir").setDescription("Afficher la configuration des logs"),
         ),
+    )
+    // ── Modération ──
+    .addSubcommandGroup((g) =>
+      g
+        .setName("moderation")
+        .setDescription("Sanctions et propagation en jeu")
+        .addSubcommand((s) =>
+          s
+            .setName("role-muet")
+            .setDescription("Rôle appliqué quand le timeout Discord ne suffit pas")
+            .addRoleOption((o) =>
+              o.setName("role").setDescription("Rôle muet").setRequired(true),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("propagation")
+            .setDescription("Répercuter les sanctions sur les serveurs Minecraft")
+            .addBooleanOption((o) =>
+              o.setName("actif").setDescription("Activer").setRequired(true),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("commande")
+            .setDescription("Commande console utilisée pour une action")
+            .addStringOption((o) =>
+              o
+                .setName("action")
+                .setDescription("Action concernée")
+                .setRequired(true)
+                .addChoices(
+                  { name: "Bannir", value: "ban" },
+                  { name: "Débannir", value: "unban" },
+                  { name: "Expulser", value: "kick" },
+                  { name: "Muter", value: "mute" },
+                  { name: "Démuter", value: "unmute" },
+                ),
+            )
+            .addStringOption((o) =>
+              o
+                .setName("commande")
+                .setDescription("Ex. tempban {player} {duration} {reason}")
+                .setRequired(true),
+            ),
+        )
+        .addSubcommand((s) =>
+          s.setName("voir").setDescription("Afficher la configuration de modération"),
+        ),
+    )
+    // ── Grades Minecraft ──
+    .addSubcommandGroup((g) =>
+      g
+        .setName("grades")
+        .setDescription("Grades LuckPerms reflétés en rôles Discord")
+        .addSubcommand((s) =>
+          s
+            .setName("actif")
+            .setDescription("Activer la synchronisation des grades")
+            .addBooleanOption((o) =>
+              o.setName("actif").setDescription("Activer").setRequired(true),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("lier")
+            .setDescription("Associer un groupe LuckPerms à un rôle Discord")
+            .addStringOption((o) =>
+              o
+                .setName("groupe")
+                .setDescription("Nom du groupe LuckPerms, ex. vip")
+                .setRequired(true),
+            )
+            .addRoleOption((o) =>
+              o.setName("role").setDescription("Rôle Discord").setRequired(true),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("delier")
+            .setDescription("Retirer l'association d'un groupe")
+            .addStringOption((o) =>
+              o.setName("groupe").setDescription("Nom du groupe").setRequired(true),
+            ),
+        )
+        .addSubcommand((s) =>
+          s.setName("voir").setDescription("Afficher les associations de grades"),
+        ),
+    )
+    // ── Votes ──
+    .addSubcommandGroup((g) =>
+      g
+        .setName("votes")
+        .setDescription("Récompenses des votes sur les listes de serveurs")
+        .addSubcommand((s) =>
+          s
+            .setName("salon")
+            .setDescription("Salon où annoncer les votes")
+            .addChannelOption((o) =>
+              o
+                .setName("salon")
+                .setDescription("Salon d'annonce")
+                .setRequired(true)
+                .addChannelTypes(ChannelType.GuildText),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("role")
+            .setDescription("Rôle temporaire donné au votant")
+            .addRoleOption((o) =>
+              o.setName("role").setDescription("Rôle « votant »").setRequired(true),
+            )
+            .addIntegerOption((o) =>
+              o
+                .setName("heures")
+                .setDescription("Durée du rôle en heures (défaut : 24)")
+                .setMinValue(1)
+                .setMaxValue(720),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("commande")
+            .setDescription("Commande console lancée à chaque vote")
+            .addStringOption((o) =>
+              o
+                .setName("commande")
+                .setDescription("Ex. crate give {player} vote 1 — vide pour désactiver")
+                .setRequired(true),
+            ),
+        )
+        .addSubcommand((s) =>
+          s.setName("voir").setDescription("Afficher la configuration des votes"),
+        ),
+    )
+    // ── Boosts ──
+    .addSubcommandGroup((g) =>
+      g
+        .setName("boosts")
+        .setDescription("Remerciement et récompense des boosts Nitro")
+        .addSubcommand((s) =>
+          s
+            .setName("salon")
+            .setDescription("Salon où remercier les boosters")
+            .addChannelOption((o) =>
+              o
+                .setName("salon")
+                .setDescription("Salon d'annonce")
+                .setRequired(true)
+                .addChannelTypes(ChannelType.GuildText),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("message")
+            .setDescription("Message de remerciement : {user} {count} {server}")
+            .addStringOption((o) =>
+              o.setName("texte").setDescription("Message").setRequired(true),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("commande")
+            .setDescription("Commande console de récompense du boost")
+            .addStringOption((o) =>
+              o
+                .setName("commande")
+                .setDescription("Ex. crate give {player} booster 1")
+                .setRequired(true),
+            ),
+        ),
+    )
+    // ── Suggestions ──
+    .addSubcommandGroup((g) =>
+      g
+        .setName("suggestions")
+        .setDescription("Salon des suggestions de la communauté")
+        .addSubcommand((s) =>
+          s
+            .setName("salon")
+            .setDescription("Salon où publier les suggestions")
+            .addChannelOption((o) =>
+              o
+                .setName("salon")
+                .setDescription("Salon des suggestions")
+                .setRequired(true)
+                .addChannelTypes(ChannelType.GuildText),
+            ),
+        ),
+    )
+    // ── Candidatures ──
+    .addSubcommandGroup((g) =>
+      g
+        .setName("candidatures")
+        .setDescription("Recrutement du staff")
+        .addSubcommand((s) =>
+          s
+            .setName("panneau")
+            .setDescription("Publier le panneau de candidature")
+            .addChannelOption((o) =>
+              o
+                .setName("salon")
+                .setDescription("Salon du panneau")
+                .setRequired(true)
+                .addChannelTypes(ChannelType.GuildText),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("salon-staff")
+            .setDescription("Salon où le staff reçoit les candidatures")
+            .addChannelOption((o) =>
+              o
+                .setName("salon")
+                .setDescription("Salon du staff")
+                .setRequired(true)
+                .addChannelTypes(ChannelType.GuildText),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("ouvrir")
+            .setDescription("Ouvrir ou fermer les candidatures")
+            .addBooleanOption((o) =>
+              o.setName("actif").setDescription("Candidatures ouvertes").setRequired(true),
+            ),
+        ),
     ),
   async execute(interaction) {
     const group = interaction.options.getSubcommandGroup(true);
@@ -488,14 +728,20 @@ const config: Command = {
       case "niveaux/recompense": {
         const level = interaction.options.getInteger("niveau", true);
         const role = interaction.options.getRole("role", true);
+        const rconCommand = interaction.options.getString("commande")?.trim() || null;
         await db
           .insert(botLevelRoles)
-          .values({ guildId, level, roleId: role.id })
+          .values({ guildId, level, roleId: role.id, rconCommand })
           .onConflictDoUpdate({
             target: [botLevelRoles.guildId, botLevelRoles.level],
-            set: { roleId: role.id },
+            set: { roleId: role.id, rconCommand },
           });
-        await reply(interaction, `Le rôle ${role} sera donné au niveau **${level}**.`);
+        await reply(
+          interaction,
+          rconCommand
+            ? `Le rôle ${role} sera donné au niveau **${level}**, avec \`${rconCommand}\` en jeu.`
+            : `Le rôle ${role} sera donné au niveau **${level}**.`,
+        );
         return;
       }
       case "niveaux/recompense-retrait": {
@@ -826,6 +1072,261 @@ const config: Command = {
           ],
           flags: MessageFlags.Ephemeral,
         });
+        return;
+      }
+
+      // ── Modération ──
+      case "moderation/role-muet": {
+        const role = interaction.options.getRole("role", true);
+        await updateGuildConfig(guildId, { muteRoleId: role.id });
+        await reply(interaction, `Rôle muet : ${role}.`);
+        return;
+      }
+      case "moderation/propagation": {
+        const actif = interaction.options.getBoolean("actif", true);
+        await updateGuildConfig(guildId, { sanctionPropagateMc: actif });
+        await reply(
+          interaction,
+          actif
+            ? "Les sanctions seront répercutées en jeu sur les comptes liés."
+            : "Les sanctions ne seront plus répercutées en jeu.",
+        );
+        return;
+      }
+      case "moderation/commande": {
+        const action = interaction.options.getString("action", true);
+        const commande = interaction.options.getString("commande", true);
+        const column = {
+          ban: "mcBanCommand",
+          unban: "mcUnbanCommand",
+          kick: "mcKickCommand",
+          mute: "mcMuteCommand",
+          unmute: "mcUnmuteCommand",
+        }[action];
+        if (!column) return;
+        await updateGuildConfig(guildId, { [column]: commande });
+        await reply(interaction, `Commande **${action}** : \`${commande}\`.`);
+        return;
+      }
+      case "moderation/voir": {
+        const cfg = await getGuildConfig(guildId);
+        await interaction.reply({
+          embeds: [
+            brandEmbed()
+              .setTitle("🔨 Configuration de modération")
+              .setDescription(
+                [
+                  `**Rôle muet** ${cfg.muteRoleId ? `<@&${cfg.muteRoleId}>` : "*non défini* (timeout Discord seul)"}`,
+                  `**Propagation en jeu** ${cfg.sanctionPropagateMc ? "✅ activée" : "❌ désactivée"}`,
+                  "",
+                  `\`ban\` → \`${cfg.mcBanCommand}\``,
+                  `\`unban\` → \`${cfg.mcUnbanCommand}\``,
+                  `\`kick\` → \`${cfg.mcKickCommand}\``,
+                  `\`mute\` → \`${cfg.mcMuteCommand}\``,
+                  `\`unmute\` → \`${cfg.mcUnmuteCommand}\``,
+                ].join("\n"),
+              )
+              .setFooter({
+                text: "Variables : {player} {reason} {duration}. Commandes diffusées à tous les serveurs dont le RCON est configuré.",
+              }),
+          ],
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      // ── Grades Minecraft ──
+      case "grades/actif": {
+        const actif = interaction.options.getBoolean("actif", true);
+        await updateGuildConfig(guildId, { rankSyncEnabled: actif });
+        await reply(
+          interaction,
+          actif
+            ? "Synchronisation des grades activée (nécessite `LUCKPERMS_DB_*` dans le `.env`)."
+            : "Synchronisation des grades désactivée.",
+        );
+        return;
+      }
+      case "grades/lier": {
+        const group = interaction.options.getString("groupe", true).toLowerCase();
+        const role = interaction.options.getRole("role", true);
+        await db
+          .insert(botRankRoles)
+          .values({ guildId, lpGroup: group, roleId: role.id })
+          .onConflictDoUpdate({
+            target: [botRankRoles.guildId, botRankRoles.lpGroup],
+            set: { roleId: role.id },
+          });
+        await reply(interaction, `Le grade \`${group}\` donnera le rôle ${role}.`);
+        return;
+      }
+      case "grades/delier": {
+        const group = interaction.options.getString("groupe", true).toLowerCase();
+        await db
+          .delete(botRankRoles)
+          .where(
+            and(eq(botRankRoles.guildId, guildId), eq(botRankRoles.lpGroup, group)),
+          );
+        await reply(interaction, `Association du grade \`${group}\` supprimée.`);
+        return;
+      }
+      case "grades/voir": {
+        const cfg = await getGuildConfig(guildId);
+        const rows = await getRankRoles(guildId);
+        await interaction.reply({
+          embeds: [
+            brandEmbed()
+              .setTitle("🏅 Grades Minecraft → rôles Discord")
+              .setDescription(
+                [
+                  `**Synchronisation** ${cfg.rankSyncEnabled ? "✅ activée" : "❌ désactivée"}`,
+                  `**Base LuckPerms** ${luckPermsConfigured ? "✅ configurée" : "❌ absente du `.env`"}`,
+                  "",
+                  rows.length
+                    ? rows.map((r) => `\`${r.lpGroup}\` → <@&${r.roleId}>`).join("\n")
+                    : "*Aucune association définie.*",
+                ].join("\n"),
+              ),
+          ],
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      // ── Votes ──
+      case "votes/salon": {
+        const salon = interaction.options.getChannel("salon", true);
+        await updateGuildConfig(guildId, { voteChannelId: salon.id });
+        await reply(interaction, `Les votes seront annoncés dans <#${salon.id}>.`);
+        return;
+      }
+      case "votes/role": {
+        const role = interaction.options.getRole("role", true);
+        const heures = interaction.options.getInteger("heures") ?? 24;
+        await updateGuildConfig(guildId, {
+          voteRoleId: role.id,
+          voteRoleHours: heures,
+        });
+        await reply(
+          interaction,
+          `Le rôle ${role} sera donné **${heures} h** après chaque vote.`,
+        );
+        return;
+      }
+      case "votes/commande": {
+        const commande = interaction.options.getString("commande", true).trim();
+        await updateGuildConfig(guildId, { voteRconCommand: commande || null });
+        await reply(
+          interaction,
+          commande
+            ? `Récompense de vote : \`${commande}\`.`
+            : "Récompense de vote désactivée.",
+        );
+        return;
+      }
+      case "votes/voir": {
+        const cfg = await getGuildConfig(guildId);
+        await interaction.reply({
+          embeds: [
+            brandEmbed()
+              .setTitle("🗳️ Configuration des votes")
+              .setDescription(
+                [
+                  `**Endpoint** ${voteEndpointConfigured ? `✅ port \`${env.VOTE_HTTP_PORT}\`, chemin \`/vote\`` : "❌ `VOTE_HTTP_PORT` et `VOTE_TOKEN` absents du `.env`"}`,
+                  `**Salon d'annonce** ${cfg.voteChannelId ? `<#${cfg.voteChannelId}>` : "*non défini*"}`,
+                  `**Rôle temporaire** ${cfg.voteRoleId ? `<@&${cfg.voteRoleId}> pendant ${cfg.voteRoleHours} h` : "*non défini*"}`,
+                  `**Récompense** ${cfg.voteRconCommand ? `\`${cfg.voteRconCommand}\`` : "*aucune*"}`,
+                ].join("\n"),
+              )
+              .setFooter({
+                text: "Les listes de serveurs doivent appeler /vote avec le jeton VOTE_TOKEN.",
+              }),
+          ],
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      // ── Boosts ──
+      case "boosts/salon": {
+        const salon = interaction.options.getChannel("salon", true);
+        await updateGuildConfig(guildId, { boostChannelId: salon.id });
+        await reply(interaction, `Les boosts seront remerciés dans <#${salon.id}>.`);
+        return;
+      }
+      case "boosts/message": {
+        await updateGuildConfig(guildId, {
+          boostMessage: interaction.options.getString("texte", true),
+        });
+        await reply(interaction, "Message de remerciement mis à jour.");
+        return;
+      }
+      case "boosts/commande": {
+        const commande = interaction.options.getString("commande", true).trim();
+        await updateGuildConfig(guildId, { boostRconCommand: commande || null });
+        await reply(
+          interaction,
+          commande
+            ? `Récompense de boost : \`${commande}\`.`
+            : "Récompense de boost désactivée.",
+        );
+        return;
+      }
+
+      // ── Suggestions ──
+      case "suggestions/salon": {
+        const salon = interaction.options.getChannel("salon", true);
+        await updateGuildConfig(guildId, { suggestionChannelId: salon.id });
+        await reply(
+          interaction,
+          `Les suggestions seront publiées dans <#${salon.id}> (commande \`/suggestion\`).`,
+        );
+        return;
+      }
+
+      // ── Candidatures ──
+      case "candidatures/panneau": {
+        const salon = interaction.options.getChannel("salon", true);
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const cfg = await getGuildConfig(guildId);
+        const channel = await interaction.guild.channels
+          .fetch(salon.id)
+          .catch(() => null);
+        if (!channel?.isSendable()) {
+          await interaction.editReply({
+            embeds: [errorEmbed("Je ne peux pas écrire dans ce salon.")],
+          });
+          return;
+        }
+        const message = await channel.send(
+          buildApplicationPanel(cfg.applicationsOpen),
+        );
+        await updateGuildConfig(guildId, {
+          applicationPanelChannelId: salon.id,
+          applicationPanelMessageId: message.id,
+        });
+        await interaction.editReply({
+          embeds: [successEmbed(`Panneau de candidature publié dans <#${salon.id}>.`)],
+        });
+        return;
+      }
+      case "candidatures/salon-staff": {
+        const salon = interaction.options.getChannel("salon", true);
+        await updateGuildConfig(guildId, { applicationReviewChannelId: salon.id });
+        await reply(
+          interaction,
+          `Les candidatures seront envoyées dans <#${salon.id}>.`,
+        );
+        return;
+      }
+      case "candidatures/ouvrir": {
+        const actif = interaction.options.getBoolean("actif", true);
+        await updateGuildConfig(guildId, { applicationsOpen: actif });
+        await refreshApplicationPanels(interaction.client as CloverClient);
+        await reply(
+          interaction,
+          actif ? "Candidatures **ouvertes**." : "Candidatures **fermées**.",
+        );
         return;
       }
     }

@@ -43,6 +43,13 @@
       "when": 1785529518941,
       "tag": "0005_certain_katie_power",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786656213726,
+      "tag": "0006_noisy_mercury",
+      "breakpoints": true
     }
   ]
 }

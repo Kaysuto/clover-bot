@@ -8,6 +8,15 @@ const interactionCreate: EventHandler<"interactionCreate"> = {
   name: "interactionCreate",
   async execute(client, interaction) {
     try {
+      if (interaction.isAutocomplete()) {
+        if (!interaction.inCachedGuild()) return;
+        const command = client.commands.get(interaction.commandName);
+        // Discord referme la liste tout seul si on ne répond pas : inutile
+        // de renvoyer une erreur visible au membre en train de taper.
+        await command?.autocomplete?.(interaction, client);
+        return;
+      }
+
       if (interaction.isChatInputCommand()) {
         if (!interaction.inCachedGuild()) return;
         const command = client.commands.get(interaction.commandName);

@@ -42,6 +42,18 @@ const envSchema = z.object({
   MINECRAFT_DB_NAME: optionalString,
   MINECRAFT_DB_TABLE_PREFIX: optionalString,
 
+  // Grades LuckPerms (lecture seule) — base distincte de celle du plugin
+  LUCKPERMS_DB_HOST: optionalString,
+  LUCKPERMS_DB_PORT: optionalPort,
+  LUCKPERMS_DB_USER: optionalString,
+  LUCKPERMS_DB_PASSWORD: optionalString,
+  LUCKPERMS_DB_NAME: optionalString,
+  LUCKPERMS_TABLE_PREFIX: optionalString,
+
+  // Réception des votes (listes de serveurs Minecraft)
+  VOTE_HTTP_PORT: optionalPort,
+  VOTE_TOKEN: optionalString,
+
   LOG_LEVEL: z.string().default("info"),
   NODE_ENV: z.enum(["development", "production"]).default("development"),
 });
@@ -66,3 +78,11 @@ export const rconConfigured = Boolean(
 export const linkDbConfigured = Boolean(
   env.MINECRAFT_DB_HOST && env.MINECRAFT_DB_USER && env.MINECRAFT_DB_NAME,
 );
+
+/** MySQL de LuckPerms (grades en jeu → rôles Discord), lecture seule. */
+export const luckPermsConfigured = Boolean(
+  env.LUCKPERMS_DB_HOST && env.LUCKPERMS_DB_USER && env.LUCKPERMS_DB_NAME,
+);
+
+/** Réception des votes : le jeton partagé est obligatoire, sinon l'endpoint reste fermé. */
+export const voteEndpointConfigured = Boolean(env.VOTE_HTTP_PORT && env.VOTE_TOKEN);
