@@ -1,7 +1,7 @@
 import type { VoiceState } from "discord.js";
 import type { CloverClient } from "../../client";
 import { getGuildConfig } from "../../db/guild-config";
-import { grantXp } from "./xp";
+import { grantXpMany } from "./xp";
 
 /**
  * Job (60 s) : crédite l'XP vocal. Conditions anti-farm :
@@ -23,15 +23,18 @@ export async function tickVoiceXp(client: CloverClient): Promise<void> {
       byChannel.set(state.channelId, list);
     }
 
+    const userIds: string[] = [];
     for (const states of byChannel.values()) {
       if (states.length < 2) continue; // seul en vocal = pas d'XP
       for (const state of states) {
         if (state.mute || state.deaf) continue;
-        await grantXp(guild, state.id, cfg.voiceXpPerMin, {
-          cfg,
-          fromVoiceMinute: true,
-        });
+        userIds.push(state.id);
       }
     }
+
+    await grantXpMany(guild, userIds, cfg.voiceXpPerMin, {
+      cfg,
+      fromVoiceMinute: true,
+    });
   }
 }

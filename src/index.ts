@@ -31,12 +31,32 @@ for (const event of events) {
 process.on("unhandledRejection", (err) => {
   logger.error({ err }, "Promesse rejetée non gérée");
 });
+process.on("uncaughtException", (err) => {
+  logger.fatal({ err }, "Exception non capturée");
+  process.exit(1);
+});
+
+/** Délai au-delà duquel on coupe sans attendre (Docker tue à 10 s). */
+const SHUTDOWN_TIMEOUT_MS = 5_000;
+
+let shuttingDown = false;
 
 async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
   logger.info({ signal }, "Arrêt du bot…");
   stopAllJobs();
+
+  // Une requête Neon bloquée ne doit pas empêcher le process de rendre la main.
+  const timeout = setTimeout(() => {
+    logger.warn("Arrêt propre trop long, sortie forcée");
+    process.exit(0);
+  }, SHUTDOWN_TIMEOUT_MS);
+  timeout.unref();
+
   await client.destroy().catch(() => undefined);
   await pool.end().catch(() => undefined);
+  clearTimeout(timeout);
   process.exit(0);
 }
 process.on("SIGINT", () => void shutdown("SIGINT"));

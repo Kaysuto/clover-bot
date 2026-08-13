@@ -13,6 +13,7 @@ import { brandEmbed, errorEmbed, successEmbed } from "../../lib/embeds";
 import {
   buildGiveawayButtons,
   buildGiveawayEmbed,
+  claimGiveaway,
   endGiveaway,
 } from "../../modules/giveaways/manager";
 import type { Command } from "../../types";
@@ -180,6 +181,14 @@ const giveaway: Command = {
           return;
         }
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        // Verrou partagé avec le job « giveaways » : sans lui, les deux
+        // tirent les gagnants du même concours en même temps.
+        if (!(await claimGiveaway(row.id))) {
+          await interaction.editReply({
+            embeds: [errorEmbed("Ce concours vient d'être terminé.")],
+          });
+          return;
+        }
         const winners = await endGiveaway(client, row);
         await interaction.editReply({
           embeds: [

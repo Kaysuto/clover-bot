@@ -182,6 +182,21 @@ export const handleGiveawayComponent: ComponentHandler = async (
 };
 
 /**
+ * Marque le concours comme terminé, en un seul UPDATE conditionnel : c'est le
+ * verrou qui empêche `/giveaway end` et le job de clôturer le même concours en
+ * parallèle (le tirage dure le temps de résoudre tous les membres). Renvoie
+ * `false` si quelqu'un d'autre a déjà pris la main.
+ */
+export async function claimGiveaway(giveawayId: number): Promise<boolean> {
+  const claimed = await db
+    .update(botGiveaways)
+    .set({ ended: true })
+    .where(and(eq(botGiveaways.id, giveawayId), eq(botGiveaways.ended, false)))
+    .returning({ id: botGiveaways.id });
+  return claimed.length > 0;
+}
+
+/**
  * Job (20 s) : termine les concours arrivés à échéance. Aucun timer long en
  * mémoire → après un redémarrage, les concours échus pendant l'arrêt sont
  * tirés au premier tick.
@@ -193,6 +208,7 @@ export async function tickGiveaways(client: CloverClient): Promise<void> {
     .where(and(eq(botGiveaways.ended, false), lte(botGiveaways.endsAt, new Date())));
 
   for (const row of due) {
+    if (!(await claimGiveaway(row.id))) continue;
     await endGiveaway(client, row).catch((err) =>
       logger.error({ err, giveaway: row.id }, "Fin de concours impossible"),
     );

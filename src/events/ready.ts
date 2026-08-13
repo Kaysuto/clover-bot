@@ -1,9 +1,11 @@
 import { syncGuildCommands } from "../lib/command-sync";
+import { touchHeartbeat } from "../lib/heartbeat";
 import { logger } from "../lib/logger";
 import { registerJob } from "../lib/scheduler";
 import { tickGiveaways } from "../modules/giveaways/manager";
 import { syncGuildInvites } from "../modules/invites/cache";
 import { tickVoiceXp } from "../modules/leveling/voice-xp";
+import { pruneXpCooldowns } from "../modules/leveling/xp";
 import { tickMcCounter } from "../modules/mc-counter/job";
 import { tickMemberCounter } from "../modules/member-counter/job";
 import { tickStatus } from "../modules/status/monitor";
@@ -92,6 +94,22 @@ const ready: EventHandler<"clientReady"> = {
         for (const guild of client.guilds.cache.values()) {
           await syncGuildInvites(guild);
         }
+      },
+    });
+    registerJob({
+      name: "heartbeat",
+      intervalMs: 30_000,
+      run: async () => {
+        if (client.isReady()) await touchHeartbeat();
+      },
+      runOnStart: true,
+    });
+    registerJob({
+      name: "xp-cooldowns",
+      intervalMs: 3_600_000, // purge des cooldowns XP expirés (table en mémoire)
+      run: async () => {
+        const removed = pruneXpCooldowns();
+        if (removed) logger.debug({ removed }, "Cooldowns XP purgés");
       },
     });
 
