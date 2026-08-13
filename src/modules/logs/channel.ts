@@ -1,5 +1,5 @@
 import type { EmbedBuilder, Guild, SendableChannels } from "discord.js";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../../db";
 import { getGuildConfig } from "../../db/guild-config";
 import { botLogSettings } from "../../db/schema";
@@ -16,6 +16,30 @@ export const LOG_CATEGORIES = {
 export type LogCategory = keyof typeof LOG_CATEGORIES;
 
 export const LOG_CATEGORY_KEYS = Object.keys(LOG_CATEGORIES) as LogCategory[];
+
+type LogSetting = typeof botLogSettings.$inferSelect;
+
+/**
+ * Cache des réglages par guilde : `sendLog` est appelé sur chaque événement
+ * loggé et la table ne change qu'via `/config logs`, qui invalide l'entrée.
+ */
+const settingsCache = new Map<string, Promise<LogSetting[]>>();
+
+function loadLogSettings(guildId: string): Promise<LogSetting[]> {
+  const hit = settingsCache.get(guildId);
+  if (hit) return hit;
+
+  const value = db
+    .select()
+    .from(botLogSettings)
+    .where(eq(botLogSettings.guildId, guildId))
+    .catch((err: unknown) => {
+      settingsCache.delete(guildId);
+      throw err;
+    });
+  settingsCache.set(guildId, value);
+  return value;
+}
 
 /**
  * Publie un embed dans le salon de logs de la catégorie.
@@ -40,12 +64,8 @@ async function resolveLogChannel(
   guild: Guild,
   category: LogCategory,
 ): Promise<SendableChannels | null> {
-  const [setting] = await db
-    .select()
-    .from(botLogSettings)
-    .where(
-      and(eq(botLogSettings.guildId, guild.id), eq(botLogSettings.category, category)),
-    );
+  const settings = await loadLogSettings(guild.id);
+  const setting = settings.find((s) => s.category === category);
   if (setting && !setting.enabled) return null;
 
   const cfg = await getGuildConfig(guild.id);
@@ -57,10 +77,8 @@ async function resolveLogChannel(
 }
 
 /** Réglages de toutes les catégories (pour `/config logs voir`). */
-export async function getLogSettings(
-  guildId: string,
-): Promise<(typeof botLogSettings.$inferSelect)[]> {
-  return db.select().from(botLogSettings).where(eq(botLogSettings.guildId, guildId));
+export async function getLogSettings(guildId: string): Promise<LogSetting[]> {
+  return loadLogSettings(guildId);
 }
 
 export async function setLogSetting(
@@ -75,4 +93,5 @@ export async function setLogSetting(
       target: [botLogSettings.guildId, botLogSettings.category],
       set: values,
     });
+  settingsCache.delete(guildId);
 }

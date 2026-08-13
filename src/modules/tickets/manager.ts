@@ -17,7 +17,11 @@ import { createTranscript } from "discord-html-transcripts";
 import { and, eq, ne, sql } from "drizzle-orm";
 import type { CloverClient } from "../../client";
 import { db } from "../../db";
-import { getGuildConfig, type GuildConfig } from "../../db/guild-config";
+import {
+  getGuildConfig,
+  type GuildConfig,
+  invalidateGuildConfig,
+} from "../../db/guild-config";
 import { botGuildConfig, botTickets } from "../../db/schema";
 import { formatDuration } from "../../lib/duration";
 import { brandEmbed, errorEmbed, successEmbed } from "../../lib/embeds";
@@ -316,12 +320,14 @@ async function createTicket(
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  // Numérotation atomique
+  // Numérotation atomique (hors updateGuildConfig, qui écraserait l'incrément
+  // par une valeur lue avant : d'où l'invalidation manuelle du cache).
   const [updated] = await db
     .update(botGuildConfig)
     .set({ ticketCounter: sql`${botGuildConfig.ticketCounter} + 1` })
     .where(eq(botGuildConfig.guildId, guild.id))
     .returning({ n: botGuildConfig.ticketCounter });
+  invalidateGuildConfig(guild.id);
   const num = updated?.n ?? 1;
 
   const channel = await guild.channels.create({

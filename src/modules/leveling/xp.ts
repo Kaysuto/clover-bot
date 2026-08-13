@@ -11,6 +11,23 @@ import { applyLevelRoles } from "./rewards";
 /** Cooldown en mémoire (clé "guildId:userId" → timestamp du dernier gain). */
 const cooldowns = new Map<string, number>();
 
+/**
+ * Purge des cooldowns expirés : une entrée est créée par membre qui parle et
+ * n'était jamais retirée — sur un process qui tourne des mois, la table ne
+ * fait que croître. Appelé par le job `xp-cooldowns` (cf. `events/ready.ts`).
+ */
+export function pruneXpCooldowns(maxAgeMs = 3_600_000): number {
+  const cutoff = Date.now() - maxAgeMs;
+  let removed = 0;
+  for (const [key, at] of cooldowns) {
+    if (at < cutoff) {
+      cooldowns.delete(key);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
 function randInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
@@ -51,17 +68,38 @@ export async function grantXp(
   amount: number,
   opts: GrantXpOptions,
 ): Promise<void> {
-  const [row] = await db
+  await grantXpMany(guild, [userId], amount, opts);
+}
+
+/**
+ * Même chose pour plusieurs membres du même montant, en un seul upsert : le
+ * job d'XP vocal crédite tout un salon à la minute et faisait sinon un
+ * aller-retour Neon par personne connectée.
+ */
+export async function grantXpMany(
+  guild: Guild,
+  userIds: string[],
+  amount: number,
+  opts: GrantXpOptions,
+): Promise<void> {
+  // Postgres refuse deux fois la même ligne dans un ON CONFLICT DO UPDATE.
+  const targets = [...new Set(userIds)];
+  if (!targets.length) return;
+
+  const now = new Date();
+  const rows = await db
     .insert(botLevels)
-    .values({
-      guildId: guild.id,
-      userId,
-      xp: amount,
-      level: levelFromXp(amount),
-      messageCount: opts.fromMessage ? 1 : 0,
-      voiceMinutes: opts.fromVoiceMinute ? 1 : 0,
-      lastMessageXpAt: opts.fromMessage ? new Date() : null,
-    })
+    .values(
+      targets.map((userId) => ({
+        guildId: guild.id,
+        userId,
+        xp: amount,
+        level: levelFromXp(amount),
+        messageCount: opts.fromMessage ? 1 : 0,
+        voiceMinutes: opts.fromVoiceMinute ? 1 : 0,
+        lastMessageXpAt: opts.fromMessage ? now : null,
+      })),
+    )
     .onConflictDoUpdate({
       target: [botLevels.guildId, botLevels.userId],
       set: {
@@ -72,15 +110,30 @@ export async function grantXp(
         voiceMinutes: opts.fromVoiceMinute
           ? sql`${botLevels.voiceMinutes} + 1`
           : undefined,
-        lastMessageXpAt: opts.fromMessage ? new Date() : undefined,
+        lastMessageXpAt: opts.fromMessage ? now : undefined,
       },
     })
     .returning();
-  if (!row) return;
 
-  const newLevel = levelFromXp(row.xp);
-  if (newLevel <= row.level) return;
+  for (const row of rows) {
+    const newLevel = levelFromXp(row.xp);
+    if (newLevel <= row.level) continue;
+    await announceLevelUp(guild, row.userId, newLevel, opts.cfg).catch((err) =>
+      logger.warn(
+        { err, guildId: guild.id, userId: row.userId },
+        "Passage de niveau non annoncé",
+      ),
+    );
+  }
+}
 
+/** Enregistre le nouveau niveau, prévient le membre et applique ses grades. */
+async function announceLevelUp(
+  guild: Guild,
+  userId: string,
+  newLevel: number,
+  cfg: GuildConfig,
+): Promise<void> {
   await db
     .update(botLevels)
     .set({ level: newLevel })
@@ -90,7 +143,7 @@ export async function grantXp(
   if (!member) return;
 
   // Annonce du passage de niveau, en privé
-  const content = opts.cfg.levelupMessage
+  const content = cfg.levelupMessage
     .replaceAll("{user}", `<@${userId}>`)
     .replaceAll("{level}", String(newLevel))
     .replaceAll("{server}", guild.name);
