@@ -28,7 +28,6 @@ export async function tickMemberCounter(client: CloverClient): Promise<void> {
       guild,
       cfg.memberCounterChannelId,
       cfg.memberCounterTemplate.replaceAll("{count}", String(count)),
-      "Compteur de membres Discord",
     );
   }
 }

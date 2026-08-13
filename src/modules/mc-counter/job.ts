@@ -19,11 +19,6 @@ export async function tickMcCounter(client: CloverClient): Promise<void> {
           .replaceAll("{max}", String(status.maxPlayers))
       : "🔴 Serveur hors ligne";
 
-    await renameCounterChannel(
-      guild,
-      cfg.counterChannelId,
-      name,
-      "Compteur de joueurs Minecraft",
-    );
+    await renameCounterChannel(guild, cfg.counterChannelId, name);
   }
 }
