@@ -6,12 +6,14 @@ import { logger } from "./logger";
  *
  * Discord limite les renommages à 2 par 10 minutes et par salon : chaque
  * appel inutile consomme ce quota et bloquerait la mise à jour suivante.
+ *
+ * Aucune raison d'audit n'est transmise : le renommage est purement mécanique
+ * et sa raison n'apporterait rien au log « Salon modifié ».
  */
 export async function renameCounterChannel(
   guild: Guild,
   channelId: string,
   name: string,
-  reason: string,
 ): Promise<void> {
   const channel = await guild.channels.fetch(channelId).catch(() => null);
   if (!channel) return;
@@ -20,7 +22,7 @@ export async function renameCounterChannel(
   if (channel.name === finalName) return;
 
   await channel
-    .setName(finalName, reason)
+    .setName(finalName)
     .catch((err) =>
       logger.warn(
         { err, guildId: guild.id, channelId },

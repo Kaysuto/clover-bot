@@ -53,12 +53,10 @@ async function reply(
 async function createCounterChannel(
   interaction: ChatInputCommandInteraction<"cached">,
   name: string,
-  reason: string,
 ): Promise<VoiceChannel> {
   return interaction.guild.channels.create({
     name: name.slice(0, 100),
     type: ChannelType.GuildVoice,
-    reason,
     permissionOverwrites: [
       {
         id: interaction.guild.roles.everyone.id,
@@ -637,11 +635,7 @@ const config: Command = {
               .replaceAll("{count}", String(status.players))
               .replaceAll("{max}", String(status.maxPlayers))
           : "🔴 Serveur hors ligne";
-        const channel = await createCounterChannel(
-          interaction,
-          name,
-          "Salon compteur de joueurs Minecraft",
-        );
+        const channel = await createCounterChannel(interaction, name);
         await updateGuildConfig(guildId, { counterChannelId: channel.id });
         await interaction.editReply({
           embeds: [
@@ -672,7 +666,6 @@ const config: Command = {
         const channel = await createCounterChannel(
           interaction,
           cfg.memberCounterTemplate.replaceAll("{count}", String(count)),
-          "Salon compteur de membres Discord",
         );
         await updateGuildConfig(guildId, { memberCounterChannelId: channel.id });
         await interaction.editReply({
@@ -724,13 +717,11 @@ const config: Command = {
         const category = await interaction.guild.channels.create({
           name: "🔊 Vocaux",
           type: ChannelType.GuildCategory,
-          reason: "Catégorie des vocaux temporaires",
         });
         const hub = await interaction.guild.channels.create({
           name: "➕ Créer ton vocal",
           type: ChannelType.GuildVoice,
           parent: category.id,
-          reason: "Hub des vocaux temporaires",
         });
         await updateGuildConfig(guildId, {
           tempvoiceCategoryId: category.id,
