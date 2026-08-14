@@ -77,7 +77,7 @@ const sanction: Command = {
         .addStringOption((o) =>
           o
             .setName("duree")
-            .setDescription("Durée : 30m, 2h, 7j… (défaut : 1 h)")
+            .setDescription("Durée : 30m, 2h, 7j… (défaut : 1h)")
             .setRequired(false),
         ),
     )

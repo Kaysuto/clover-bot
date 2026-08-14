@@ -101,7 +101,7 @@ export async function logChannelUpdate(
     oldChannel.rateLimitPerUser !== newChannel.rateLimitPerUser
   ) {
     changes.push(
-      `**Mode lent** ${oldChannel.rateLimitPerUser ?? 0} s → ${newChannel.rateLimitPerUser ?? 0} s`,
+      `**Mode lent** ${oldChannel.rateLimitPerUser ?? 0}s → ${newChannel.rateLimitPerUser ?? 0}s`,
     );
   }
   if ("nsfw" in oldChannel && "nsfw" in newChannel && oldChannel.nsfw !== newChannel.nsfw) {

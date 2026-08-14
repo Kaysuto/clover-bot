@@ -24,16 +24,16 @@ export function parseDuration(input: string): number | null {
   return found && total > 0 ? total : null;
 }
 
-/** Formate une durée en français : "2 j 3 h 5 min". */
+/** Formate une durée en français : "2j 3h 5min". */
 export function formatDuration(ms: number): string {
   const parts: string[] = [];
   const days = Math.floor(ms / 86_400_000);
   const hours = Math.floor((ms % 86_400_000) / 3_600_000);
   const minutes = Math.floor((ms % 3_600_000) / 60_000);
   const seconds = Math.floor((ms % 60_000) / 1_000);
-  if (days) parts.push(`${days} j`);
-  if (hours) parts.push(`${hours} h`);
-  if (minutes) parts.push(`${minutes} min`);
-  if (!parts.length) parts.push(`${seconds} s`);
+  if (days) parts.push(`${days}j`);
+  if (hours) parts.push(`${hours}h`);
+  if (minutes) parts.push(`${minutes}min`);
+  if (!parts.length) parts.push(`${seconds}s`);
   return parts.join(" ");
 }

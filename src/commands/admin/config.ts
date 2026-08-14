@@ -790,7 +790,7 @@ const config: Command = {
         });
         await reply(
           interaction,
-          `XP par message : **${min}–${max}**, anti-spam : **${cooldown} s**.`,
+          `XP par message : **${min}–${max}**, anti-spam : **${cooldown}s**.`,
         );
         return;
       }
@@ -986,7 +986,7 @@ const config: Command = {
         await interaction.editReply({
           embeds: [
             successEmbed(
-              `Compteur de joueurs créé : ${channel} (actualisé toutes les 6 min).`,
+              `Compteur de joueurs créé : ${channel} (actualisé toutes les 6min).`,
             ),
           ],
         });
@@ -1017,7 +1017,7 @@ const config: Command = {
         await interaction.editReply({
           embeds: [
             successEmbed(
-              `Compteur de membres créé : ${channel} — **${count}** membre(s), bots exclus (actualisé toutes les 6 min).`,
+              `Compteur de membres créé : ${channel} — **${count}** membre(s), bots exclus (actualisé toutes les 6min).`,
             ),
           ],
         });
@@ -1107,7 +1107,7 @@ const config: Command = {
         });
         await reply(
           interaction,
-          `L'embed de statut sera publié dans ${channel} d'ici 60 s, puis actualisé en continu.`,
+          `L'embed de statut sera publié dans ${channel} d'ici 60s, puis actualisé en continu.`,
         );
         return;
       }
@@ -1309,7 +1309,7 @@ const config: Command = {
         });
         await reply(
           interaction,
-          `Le rôle ${role} sera donné **${heures} h** après chaque vote.`,
+          `Le rôle ${role} sera donné **${heures}h** après chaque vote.`,
         );
         return;
       }
@@ -1334,7 +1334,7 @@ const config: Command = {
                 [
                   `**Endpoint** ${voteEndpointConfigured ? `✅ port \`${env.VOTE_HTTP_PORT}\`, chemin \`/vote\`` : "❌ `VOTE_HTTP_PORT` et `VOTE_TOKEN` absents du `.env`"}`,
                   `**Salon d'annonce** ${cfg.voteChannelId ? `<#${cfg.voteChannelId}>` : "*non défini*"}`,
-                  `**Rôle temporaire** ${cfg.voteRoleId ? `<@&${cfg.voteRoleId}> pendant ${cfg.voteRoleHours} h` : "*non défini*"}`,
+                  `**Rôle temporaire** ${cfg.voteRoleId ? `<@&${cfg.voteRoleId}> pendant ${cfg.voteRoleHours}h` : "*non défini*"}`,
                   `**Récompense** ${cfg.voteRconCommand ? `\`${cfg.voteRconCommand}\`` : "*aucune*"}`,
                 ].join("\n"),
               )

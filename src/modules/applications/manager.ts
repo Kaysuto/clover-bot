@@ -58,7 +58,7 @@ interface Position {
 const COMMON_QUESTIONS: Question[] = [
   {
     label: "Temps disponible par semaine",
-    hint: "Moins de 5 h, 5 à 10 h, 10 à 20 h ou plus — mieux vaut peu mais régulier.",
+    hint: "Moins de 5h, 5 à 10h, 10 à 20h ou plus — mieux vaut peu mais régulier.",
   },
   {
     label: "Sanctions déjà reçues",

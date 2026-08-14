@@ -178,7 +178,7 @@ export function buildStatusEmbed(client: Client): EmbedBuilder {
     })
     .setTitle("📊 État des services")
     .setDescription(`> ${line}`)
-    .setFooter({ text: "Actualisation automatique toutes les 60 s" })
+    .setFooter({ text: "Actualisation automatique toutes les 60s" })
     .setTimestamp();
 
   // Discord plafonne à 25 champs ; le réseau en a 7, la garde est de principe.

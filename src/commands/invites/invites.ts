@@ -77,7 +77,7 @@ const invites: Command = {
         embed.addFields({
           name: "Récompenses",
           value: [
-            `⏳ ${summary.pending} en attente _(maturation : ${cfg.inviteMaturityDays} j)_`,
+            `⏳ ${summary.pending} en attente _(maturation : ${cfg.inviteMaturityDays}j)_`,
             `✅ ${summary.rewarded} validée(s)`,
             `❌ ${summary.rejected} refusée(s)`,
             summary.credits ? `🪙 ${summary.credits} crédits versés` : null,
