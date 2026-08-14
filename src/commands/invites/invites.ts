@@ -1,8 +1,10 @@
 import { InteractionContextType, SlashCommandBuilder } from "discord.js";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../../db";
+import { getGuildConfig } from "../../db/guild-config";
 import { botInviteStats } from "../../db/schema";
 import { brandEmbed } from "../../lib/embeds";
+import { inviteRewardSummary } from "../../modules/invites/rewards";
 import type { Command } from "../../types";
 
 const totalExpr = sql<number>`${botInviteStats.seedUses} + ${botInviteStats.joins} - ${botInviteStats.leaves} + ${botInviteStats.bonus}`;
@@ -67,6 +69,23 @@ const invites: Command = {
         .setFooter({
           text: "Historiques = invitations comptées avant l'installation du bot",
         });
+
+      // Récompenses : n'apparaît que si le parrainage rapporte quelque chose.
+      const cfg = await getGuildConfig(interaction.guildId);
+      if (cfg.inviteXp > 0 || cfg.inviteCredits > 0) {
+        const summary = await inviteRewardSummary(interaction.guildId, target.id);
+        embed.addFields({
+          name: "Récompenses",
+          value: [
+            `⏳ ${summary.pending} en attente _(maturation : ${cfg.inviteMaturityDays} j)_`,
+            `✅ ${summary.rewarded} validée(s)`,
+            `❌ ${summary.rejected} refusée(s)`,
+            summary.credits ? `🪙 ${summary.credits} crédits versés` : null,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        });
+      }
 
       await interaction.reply({ embeds: [embed] });
       return;

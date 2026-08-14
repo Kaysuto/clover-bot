@@ -3,6 +3,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "../../db";
 import { botInviteJoins } from "../../db/schema";
 import { logger } from "../../lib/logger";
+import { announceInvite } from "./announce";
 import {
   bumpInviteStat,
   deleteInvite,
@@ -118,10 +119,18 @@ async function recordJoin(
     inviterId: used?.inviterId ?? null,
     code: used?.code ?? null,
     isVanity,
+    // Sans inviteur identifié, il n'y a personne à récompenser : la ligne est
+    // close d'emblée pour que le job de maturation ne la reprenne jamais.
+    rewardStatus: used?.inviterId ? "PENDING" : "REJECTED",
+    rewardReason: used?.inviterId ? null : "Inviteur inconnu",
   });
   if (used?.inviterId) {
     await bumpInviteStat(member.guild.id, used.inviterId, "joins");
   }
+
+  await announceInvite(member, used?.inviterId ?? null, isVanity).catch((err) =>
+    logger.warn({ err, memberId: member.id }, "Annonce d'invitation impossible"),
+  );
 }
 
 /** Au départ d'un membre : clôt son entrée de journal et décrémente l'inviteur. */

@@ -1,6 +1,7 @@
 import { handleApplicationComponent } from "./modules/applications/manager";
 import { handleGiveawayComponent } from "./modules/giveaways/manager";
 import { handleLeaderboardComponent } from "./modules/leveling/leaderboard";
+import { handleShopComponent } from "./modules/shop/manager";
 import { handleSuggestionComponent } from "./modules/suggestions/manager";
 import { handleTempVoiceComponent } from "./modules/tempvoice/components";
 import { handleTicketComponent } from "./modules/tickets/manager";
@@ -15,6 +16,7 @@ export const componentHandlers: Record<string, ComponentHandler> = {
   voc: handleTempVoiceComponent,
   sugg: handleSuggestionComponent,
   cand: handleApplicationComponent,
+  shop: handleShopComponent,
 };
 
 /**

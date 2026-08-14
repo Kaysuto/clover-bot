@@ -9,16 +9,22 @@ import {
 } from "discord.js";
 import { and, eq } from "drizzle-orm";
 import type { CloverClient } from "../../client";
-import { env, luckPermsConfigured, voteEndpointConfigured } from "../../config";
+import {
+  env,
+  luckPermsConfigured,
+  siteApiConfigured,
+  voteEndpointConfigured,
+} from "../../config";
 import { db } from "../../db";
 import { getGuildConfig, updateGuildConfig } from "../../db/guild-config";
-import { botLevelRoles, botRankRoles } from "../../db/schema";
+import { botInviteTiers, botLevelRoles, botRankRoles } from "../../db/schema";
 import { brandEmbed, errorEmbed, successEmbed } from "../../lib/embeds";
 import { getMcStatus } from "../../lib/mc-status";
 import {
   buildApplicationPanel,
   refreshApplicationPanels,
 } from "../../modules/applications/manager";
+import { getInviteTiers } from "../../modules/invites/rewards";
 import { getRankRoles } from "../../modules/ranks/sync";
 import {
   getLogSettings,
@@ -617,6 +623,100 @@ const config: Command = {
                 .setRequired(true)
                 .addChannelTypes(ChannelType.GuildText),
             ),
+        ),
+    )
+    // ── Invitations ──
+    .addSubcommandGroup((g) =>
+      g
+        .setName("invitations")
+        .setDescription("Annonce et récompenses du parrainage")
+        .addSubcommand((s) =>
+          s
+            .setName("salon")
+            .setDescription("Salon où annoncer qui invite qui")
+            .addChannelOption((o) =>
+              o
+                .setName("salon")
+                .setDescription("Salon d'annonce")
+                .setRequired(true)
+                .addChannelTypes(ChannelType.GuildText),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("recompenses")
+            .setDescription("XP et crédits versés par invitation validée")
+            .addIntegerOption((o) =>
+              o
+                .setName("xp")
+                .setDescription("XP par invitation (0 pour désactiver)")
+                .setMinValue(0)
+                .setMaxValue(10_000),
+            )
+            .addIntegerOption((o) =>
+              o
+                .setName("credits")
+                .setDescription("Crédits par invitation (1 crédit = 0,01 €)")
+                .setMinValue(0)
+                .setMaxValue(500),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("conditions")
+            .setDescription("Garde-fous anti multi-comptes")
+            .addIntegerOption((o) =>
+              o
+                .setName("maturation")
+                .setDescription("Jours d'attente avant récompense")
+                .setMinValue(0)
+                .setMaxValue(90),
+            )
+            .addIntegerOption((o) =>
+              o
+                .setName("age-compte")
+                .setDescription("Âge minimal du compte du filleul, en jours")
+                .setMinValue(0)
+                .setMaxValue(365),
+            )
+            .addIntegerOption((o) =>
+              o
+                .setName("niveau")
+                .setDescription("Niveau minimal sans compte lié (0 = lien obligatoire)")
+                .setMinValue(0)
+                .setMaxValue(100),
+            )
+            .addIntegerOption((o) =>
+              o
+                .setName("plafond")
+                .setDescription("Invitations validées par parrain et par mois")
+                .setMinValue(1)
+                .setMaxValue(1_000),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("palier")
+            .setDescription("Bonus en crédits à partir de N invitations")
+            .addIntegerOption((o) =>
+              o
+                .setName("nombre")
+                .setDescription("Nombre d'invitations validées")
+                .setRequired(true)
+                .setMinValue(1)
+                .setMaxValue(10_000),
+            )
+            .addIntegerOption((o) =>
+              o
+                .setName("credits")
+                .setDescription("Crédits versés une fois (0 pour supprimer le palier)")
+                .setRequired(true)
+                .setMinValue(0)
+                .setMaxValue(5_000),
+            ),
+        )
+        .addSubcommand((s) =>
+          s.setName("voir").setDescription("Afficher la configuration du parrainage"),
         ),
     )
     // ── Candidatures ──
@@ -1281,6 +1381,126 @@ const config: Command = {
           interaction,
           `Les suggestions seront publiées dans <#${salon.id}> (commande \`/suggestion\`).`,
         );
+        return;
+      }
+
+      // ── Invitations ──
+      case "invitations/salon": {
+        const salon = interaction.options.getChannel("salon", true);
+        await updateGuildConfig(guildId, { inviteChannelId: salon.id });
+        await reply(interaction, `Les invitations seront annoncées dans <#${salon.id}>.`);
+        return;
+      }
+      case "invitations/recompenses": {
+        const xp = interaction.options.getInteger("xp");
+        const credits = interaction.options.getInteger("credits");
+        if (xp === null && credits === null) {
+          await interaction.reply({
+            embeds: [errorEmbed("Précise au moins `xp` ou `credits`.")],
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+        await updateGuildConfig(guildId, {
+          inviteXp: xp ?? undefined,
+          inviteCredits: credits ?? undefined,
+        });
+        await reply(
+          interaction,
+          [
+            xp !== null ? `XP par invitation : **${xp}**.` : null,
+            credits !== null
+              ? `Crédits par invitation : **${credits}** _(${(credits / 100).toFixed(2)} € de valeur boutique)_.`
+              : null,
+            credits && !siteApiConfigured
+              ? "⚠️ `SITE_API_URL`/`SITE_API_TOKEN` absents du `.env` : aucun crédit ne sera versé."
+              : null,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
+        return;
+      }
+      case "invitations/conditions": {
+        const maturation = interaction.options.getInteger("maturation");
+        const age = interaction.options.getInteger("age-compte");
+        const niveau = interaction.options.getInteger("niveau");
+        const plafond = interaction.options.getInteger("plafond");
+        await updateGuildConfig(guildId, {
+          inviteMaturityDays: maturation ?? undefined,
+          inviteMinAccountAgeDays: age ?? undefined,
+          inviteMinLevel: niveau ?? undefined,
+          inviteRequireLink: niveau === 0 ? true : undefined,
+          inviteMonthlyCap: plafond ?? undefined,
+        });
+        await reply(interaction, "Conditions de validation mises à jour.");
+        return;
+      }
+      case "invitations/palier": {
+        const threshold = interaction.options.getInteger("nombre", true);
+        const credits = interaction.options.getInteger("credits", true);
+        if (credits === 0) {
+          await db
+            .delete(botInviteTiers)
+            .where(
+              and(
+                eq(botInviteTiers.guildId, guildId),
+                eq(botInviteTiers.threshold, threshold),
+              ),
+            );
+          await reply(interaction, `Palier de **${threshold}** invitations supprimé.`);
+          return;
+        }
+        await db
+          .insert(botInviteTiers)
+          .values({ guildId, threshold, credits })
+          .onConflictDoUpdate({
+            target: [botInviteTiers.guildId, botInviteTiers.threshold],
+            set: { credits },
+          });
+        await reply(
+          interaction,
+          `Palier : **${credits}** crédits à **${threshold}** invitations validées.`,
+        );
+        return;
+      }
+      case "invitations/voir": {
+        const cfg = await getGuildConfig(guildId);
+        const tiers = await getInviteTiers(guildId);
+        await interaction.reply({
+          embeds: [
+            brandEmbed()
+              .setTitle("📨 Configuration du parrainage")
+              .setDescription(
+                [
+                  `**Salon d'annonce** ${cfg.inviteChannelId ? `<#${cfg.inviteChannelId}>` : "*non défini*"}`,
+                  `**XP par invitation** ${cfg.inviteXp || "désactivée"}`,
+                  `**Crédits par invitation** ${cfg.inviteCredits || "désactivés"}${
+                    cfg.inviteCredits && !siteApiConfigured
+                      ? " ⚠️ site non configuré"
+                      : ""
+                  }`,
+                  "",
+                  "**Conditions de validation**",
+                  `· maturation : **${cfg.inviteMaturityDays}** jour(s)`,
+                  `· âge du compte du filleul : **${cfg.inviteMinAccountAgeDays}** jour(s)`,
+                  `· preuve d'activité : compte lié${cfg.inviteMinLevel > 0 ? ` ou niveau ${cfg.inviteMinLevel}` : " (obligatoire)"}`,
+                  `· plafond mensuel : **${cfg.inviteMonthlyCap}** par parrain`,
+                  "",
+                  "**Paliers**",
+                  tiers.length
+                    ? tiers
+                        .map((t) => `· ${t.threshold} invitations → **${t.credits}** crédits`)
+                        .join("\n")
+                    : "*aucun palier défini*",
+                ].join("\n"),
+              )
+              .setFooter({
+                text: "Référence : 100 crédits = 1,00 € · le jeu rapporte 1 crédit par heure active.",
+              }),
+          ],
+          flags: MessageFlags.Ephemeral,
+        });
         return;
       }
 

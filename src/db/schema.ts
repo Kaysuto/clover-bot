@@ -112,6 +112,24 @@ export const botGuildConfig = pgTable("bot_guild_config", {
   // Suggestions
   suggestionChannelId: text("suggestion_channel_id"),
 
+  // Invitations
+  /** Salon où annoncer « X a été invité par Y ». */
+  inviteChannelId: text("invite_channel_id"),
+  /** XP versée au parrain quand l'invitation est validée (0 = désactivé). */
+  inviteXp: integer("invite_xp").notNull().default(250),
+  /** Crédits versés par invitation validée (0 = désactivé). */
+  inviteCredits: integer("invite_credits").notNull().default(0),
+  /** Délai de maturation avant récompense, en jours. */
+  inviteMaturityDays: integer("invite_maturity_days").notNull().default(7),
+  /** Âge minimal du compte Discord du filleul à son arrivée, en jours. */
+  inviteMinAccountAgeDays: integer("invite_min_account_age_days").notNull().default(30),
+  /** Le filleul doit avoir lié son compte Minecraft pour valider l'invitation. */
+  inviteRequireLink: boolean("invite_require_link").notNull().default(true),
+  /** Niveau Discord minimal accepté à défaut de compte lié (0 = lien obligatoire). */
+  inviteMinLevel: integer("invite_min_level").notNull().default(3),
+  /** Plafond d'invitations validées par parrain et par mois. */
+  inviteMonthlyCap: integer("invite_monthly_cap").notNull().default(30),
+
   // Candidatures staff
   applicationPanelChannelId: text("application_panel_channel_id"),
   applicationPanelMessageId: text("application_panel_message_id"),
@@ -240,11 +258,51 @@ export const botInviteJoins = pgTable(
     isVanity: boolean("is_vanity").notNull().default(false),
     joinedAt: timestamp("joined_at").notNull().defaultNow(),
     leftAt: timestamp("left_at"),
+    /**
+     * Cycle de récompense du parrainage :
+     * PENDING → en attente de maturation ; REWARDED → XP et crédits versés ;
+     * REJECTED → conditions non tenues (départ, compte trop jeune, plafond…).
+     * `reward_reason` porte le motif du refus, affiché par `/invites`.
+     */
+    rewardStatus: text("reward_status").notNull().default("PENDING"),
+    rewardedAt: timestamp("reward_at", { withTimezone: true }),
+    rewardReason: text("reward_reason"),
+    creditsAwarded: integer("credits_awarded").notNull().default(0),
+    xpAwarded: integer("xp_awarded").notNull().default(0),
   },
   (t) => [
     index("bot_invite_joins_inviter_idx").on(t.guildId, t.inviterId),
     index("bot_invite_joins_member_idx").on(t.guildId, t.memberId),
+    index("bot_invite_joins_reward_idx").on(t.rewardStatus, t.joinedAt),
   ],
+);
+
+/**
+ * Paliers de récompense : bonus en crédits versé une seule fois quand le
+ * parrain atteint `threshold` invitations validées.
+ */
+export const botInviteTiers = pgTable(
+  "bot_invite_tiers",
+  {
+    id: serial("id").primaryKey(),
+    guildId: text("guild_id").notNull(),
+    threshold: integer("threshold").notNull(),
+    credits: integer("credits").notNull(),
+  },
+  (t) => [uniqueIndex("bot_invite_tiers_guild_threshold_idx").on(t.guildId, t.threshold)],
+);
+
+/** Paliers déjà versés, pour ne jamais rejouer un bonus. */
+export const botInviteTierGrants = pgTable(
+  "bot_invite_tier_grants",
+  {
+    guildId: text("guild_id").notNull(),
+    userId: text("user_id").notNull(),
+    threshold: integer("threshold").notNull(),
+    credits: integer("credits").notNull(),
+    grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.guildId, t.userId, t.threshold] })],
 );
 
 /**

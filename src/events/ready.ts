@@ -6,6 +6,7 @@ import { seedServers } from "../lib/servers";
 import { refreshApplicationPanels } from "../modules/applications/manager";
 import { tickGiveaways } from "../modules/giveaways/manager";
 import { syncGuildInvites } from "../modules/invites/cache";
+import { tickInviteRewards } from "../modules/invites/rewards";
 import { tickVoiceXp } from "../modules/leveling/voice-xp";
 import { pruneXpCooldowns } from "../modules/leveling/xp";
 import { tickMcCounter } from "../modules/mc-counter/job";
@@ -115,6 +116,12 @@ const ready: EventHandler<"clientReady"> = {
           await syncGuildInvites(guild);
         }
       },
+    });
+    registerJob({
+      name: "invite-rewards",
+      intervalMs: 30 * 60_000, // maturation des parrainages (J+7 par défaut)
+      run: () => tickInviteRewards(client),
+      runOnStart: true,
     });
     registerJob({
       name: "vote-roles",
