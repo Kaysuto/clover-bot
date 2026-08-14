@@ -14,6 +14,7 @@ import {
 } from "discord.js";
 import { and, eq } from "drizzle-orm";
 import type { CloverClient } from "../../client";
+import { env } from "../../config";
 import { db } from "../../db";
 import { getGuildConfig, updateGuildConfig } from "../../db/guild-config";
 import { botApplications } from "../../db/schema";
@@ -26,73 +27,199 @@ import {
 } from "../../lib/embeds";
 import { buildId } from "../../lib/ids";
 import { logger } from "../../lib/logger";
+import { getLinkedAccount } from "../sync/manager";
 import type { ComponentHandler } from "../../types";
 
 export type ApplicationRow = typeof botApplications.$inferSelect;
 export type ApplicationStatus = "PENDING" | "ACCEPTED" | "REFUSED";
+
+interface Question {
+  /** Libellé du champ : 45 caractères au maximum (limite Discord). */
+  label: string;
+  /** Reformulation complète de la question : 100 caractères au maximum. */
+  hint: string;
+  /** Champ multiligne (les questions ouvertes) plutôt que ligne simple. */
+  long?: boolean;
+}
 
 interface Position {
   label: string;
   emoji: string;
   description: string;
   /** 5 questions au maximum : c'est la limite d'une modale Discord. */
-  questions: string[];
+  questions: Question[];
 }
 
 /**
- * Postes ouverts aux candidatures. Les questions sont posées dans une modale,
- * donc limitées à cinq et à 45 caractères de libellé (contraintes Discord).
+ * Tronc commun, repris du formulaire du site (`COMMON_QUESTIONS` de
+ * `siteweb/src/lib/db/recruitment-defaults.ts`). Le pseudo Minecraft n'y
+ * figure pas : il est résolu automatiquement depuis la liaison du candidat.
+ */
+const COMMON_QUESTIONS: Question[] = [
+  {
+    label: "Temps disponible par semaine",
+    hint: "Moins de 5 h, 5 à 10 h, 10 à 20 h ou plus — mieux vaut peu mais régulier.",
+  },
+  {
+    label: "Sanctions déjà reçues",
+    hint: "Ici ou ailleurs : sanction, motif, ce que tu en as retenu. « Aucune » sinon.",
+  },
+];
+
+/**
+ * Postes ouverts aux candidatures, calqués sur ceux du site
+ * (`DEFAULT_ROLES` / `ROLE_QUESTIONS` du même fichier).
+ *
+ * Le site pose une dizaine de questions en trois étapes, avec envoi d'images ;
+ * une modale Discord plafonne à cinq champs texte. On garde donc les deux
+ * questions communes les plus discriminantes, puis trois questions du poste —
+ * une de parcours, deux de maîtrise — et le panneau renvoie au formulaire
+ * complet pour les dossiers qui demandent un portfolio.
  */
 export const APPLICATION_POSITIONS: Record<string, Position> = {
+  support: {
+    label: "Support",
+    emoji: "🎧",
+    description: "Aider les joueurs dans leurs demandes et traiter les tickets de support.",
+    questions: [
+      ...COMMON_QUESTIONS,
+      {
+        label: "Ce que tu connais des modes de jeu",
+        hint: "Lesquels as-tu joués, combien de temps, quelles questions reviennent chez les joueurs ?",
+        long: true,
+      },
+      {
+        label: "Joueur énervé : stuff perdu sur un bug",
+        hint: "Ce que tu lui écris, ce que tu lui demandes, ce que tu vérifies, à qui tu transmets.",
+        long: true,
+      },
+      {
+        label: "Quand tu ne connais pas la réponse",
+        hint: "Ta démarche concrète : où tu cherches, qui tu sollicites.",
+        long: true,
+      },
+    ],
+  },
   moderateur: {
     label: "Modérateur",
     emoji: "🛡️",
-    description: "Veiller au respect du règlement, en jeu et sur Discord",
+    description:
+      "Faire respecter les règles et assurer une ambiance saine sur le serveur et Discord.",
     questions: [
-      "Ton âge et ton fuseau horaire",
-      "Ton pseudo Minecraft",
-      "Combien d'heures par semaine ?",
-      "Ton expérience de la modération",
-      "Pourquoi toi ?",
+      ...COMMON_QUESTIONS,
+      {
+        label: "Ton expérience de la modération",
+        hint: "Communautés modérées et leur taille, outils utilisés, durée, conflits gérés.",
+        long: true,
+      },
+      {
+        label: "Un habitué et un nouveau s'insultent",
+        hint: "Tes actions dans l'ordre, les sanctions envisagées, les preuves que tu conserves.",
+        long: true,
+      },
+      {
+        label: "Avertissement, mute, kick, bannissement",
+        hint: "Sur quels critères passes-tu de l'un à l'autre ? Le barème est sur le wiki.",
+        long: true,
+      },
     ],
   },
-  animateur: {
-    label: "Animateur",
-    emoji: "🎪",
-    description: "Organiser des événements et animer la communauté",
+  architecte: {
+    label: "Architecte",
+    emoji: "🗺️",
+    description: "Concevoir et construire les décors et structures du serveur.",
     questions: [
-      "Ton âge et ton fuseau horaire",
-      "Ton pseudo Minecraft",
-      "Combien d'heures par semaine ?",
-      "Une idée d'événement à organiser",
-      "Pourquoi toi ?",
+      ...COMMON_QUESTIONS,
+      {
+        label: "Où voir tes constructions",
+        hint: "Portfolio, galerie, Planet Minecraft, vidéo, Drive… décris brièvement chaque lien.",
+        long: true,
+      },
+      {
+        label: "Tes styles et tes outils",
+        hint: "Médiéval, moderne, terraforming… WorldEdit, VoxelSniper, Axiom, Blender.",
+        long: true,
+      },
+      {
+        label: "Rendre une arène PvP jouable",
+        hint: "Lisibilité en combat, points d'apparition, accès et échappatoires, entités coûteuses.",
+        long: true,
+      },
     ],
   },
-  builder: {
-    label: "Builder",
-    emoji: "🏗️",
-    description: "Construire les maps et les décors du réseau",
+  graphiste: {
+    label: "Graphiste",
+    emoji: "✨",
+    description: "Créer les visuels, bannières et éléments graphiques de la communauté.",
     questions: [
-      "Ton âge et ton fuseau horaire",
-      "Ton pseudo Minecraft",
-      "Combien d'heures par semaine ?",
-      "Lien vers tes constructions",
-      "Tes styles de prédilection",
+      ...COMMON_QUESTIONS,
+      {
+        label: "Lien vers ton portfolio",
+        hint: "Behance, ArtStation, X, Instagram, Drive, salon Discord… plusieurs liens si besoin.",
+        long: true,
+      },
+      {
+        label: "Visuels et logiciels maîtrisés",
+        hint: "Bannières, logos, miniatures, habillage Discord… et Photoshop, Illustrator, Figma.",
+        long: true,
+      },
+      {
+        label: "Visuel Discord ou visuel boutique",
+        hint: "Qu'est-ce qui change entre les deux ? Format, poids, lisibilité en miniature…",
+        long: true,
+      },
+    ],
+  },
+  redacteur: {
+    label: "Rédacteur",
+    emoji: "📰",
+    description: "Écrire et maintenir la documentation du wiki, les articles et les annonces.",
+    questions: [
+      ...COMMON_QUESTIONS,
+      {
+        label: "Montre-nous ce que tu as écrit",
+        hint: "Articles, wiki, blog, guides, posts Discord. Sans lien public, colle un extrait.",
+        long: true,
+      },
+      {
+        label: "Annonce d'ouverture d'un mode",
+        hint: "Exercice : rédige-la. Quelques lignes suffisent, tu choisis le ton et le format.",
+        long: true,
+      },
+      {
+        label: "Documenter un mode que tu ne connais pas",
+        hint: "Qui tu vas voir, ce que tu testes toi-même, comment tu vérifies avant de publier.",
+        long: true,
+      },
     ],
   },
   developpeur: {
     label: "Développeur",
-    emoji: "💻",
-    description: "Développer les plugins et les outils du réseau",
+    emoji: "🔧",
+    description: "Contribuer au développement du serveur Minecraft ou de la plateforme web.",
     questions: [
-      "Ton âge et ton fuseau horaire",
-      "Ton pseudo Minecraft",
-      "Combien d'heures par semaine ?",
-      "Langages et API maîtrisés",
-      "Lien vers ton code (GitHub…)",
+      ...COMMON_QUESTIONS,
+      {
+        label: "Ton GitHub ou du code que tu as écrit",
+        hint: "Dépôts publics, plugins publiés, sites en ligne. Précise ce que tu as écrit toi-même.",
+        long: true,
+      },
+      {
+        label: "Langages et technologies maîtrisés",
+        hint: "Java, API Spigot/Paper, SQL, TypeScript, React/Next.js, Docker… et depuis quand.",
+        long: true,
+      },
+      {
+        label: "Thread principal et asynchrone sur Paper",
+        hint: "La différence, et ce qu'on ne fait jamais en asynchrone. Réponds avec tes mots.",
+        long: true,
+      },
     ],
   },
 };
+
+/** Formulaire complet du site, seul à accepter portfolios et captures. */
+const RECRUITMENT_URL = `${env.WEBSITE_URL.replace(/\/$/, "")}/recruitment`;
 
 const STATUS_META: Record<
   ApplicationStatus,
@@ -116,9 +243,10 @@ export function buildApplicationPanel(open: boolean) {
               (p) => `${p.emoji} **${p.label}** — ${p.description}`,
             ),
             "",
+            `📄 Formulaire complet (portfolio, images, questions détaillées) : ${RECRUITMENT_URL}`,
             "_Une réponse te sera donnée en message privé. Une seule candidature en cours à la fois._",
           ].join("\n")
-        : "🔒 Les candidatures sont **fermées** pour le moment. Reviens plus tard !",
+        : `🔒 Les candidatures sont **fermées** sur Discord pour le moment.\n\nLe formulaire du site reste consultable : ${RECRUITMENT_URL}`,
     );
 
   const menu = new StringSelectMenuBuilder()
@@ -143,6 +271,7 @@ export function buildApplicationPanel(open: boolean) {
 export function buildApplicationEmbed(
   row: ApplicationRow,
   applicant: User | null,
+  minecraftUsername?: string | null,
 ): EmbedBuilder {
   const position = APPLICATION_POSITIONS[row.position];
   const meta = STATUS_META[row.status as ApplicationStatus] ?? STATUS_META.PENDING;
@@ -162,10 +291,18 @@ export function buildApplicationEmbed(
     });
   }
 
+  if (minecraftUsername) {
+    embed.addFields({
+      name: "Compte Minecraft",
+      value: `\`${minecraftUsername}\``,
+      inline: true,
+    });
+  }
+
   const questions = position?.questions ?? [];
   embed.addFields(
     row.answers.map((answer, i) => ({
-      name: questions[i] ?? `Question ${i + 1}`,
+      name: questions[i]?.label ?? `Question ${i + 1}`,
       value: answer.slice(0, 1_024) || "—",
     })),
   );
@@ -247,10 +384,11 @@ export const handleApplicationComponent: ComponentHandler = async (
             new ActionRowBuilder<TextInputBuilder>().addComponents(
               new TextInputBuilder()
                 .setCustomId(`q${i}`)
-                .setLabel(question.slice(0, 45))
-                .setStyle(i >= 3 ? TextInputStyle.Paragraph : TextInputStyle.Short)
+                .setLabel(question.label.slice(0, 45))
+                .setPlaceholder(question.hint.slice(0, 100))
+                .setStyle(question.long ? TextInputStyle.Paragraph : TextInputStyle.Short)
                 .setRequired(true)
-                .setMaxLength(i >= 3 ? 1_000 : 200),
+                .setMaxLength(question.long ? 1_000 : 200),
             ),
           ),
         ),
@@ -373,11 +511,14 @@ export const handleApplicationComponent: ComponentHandler = async (
       flags: MessageFlags.Ephemeral,
     });
 
-    const applicant = await interaction.client.users.fetch(row.userId).catch(() => null);
+    const [applicant, linked] = await Promise.all([
+      interaction.client.users.fetch(row.userId).catch(() => null),
+      getLinkedAccount(row.userId).catch(() => null),
+    ]);
     if (interaction.message) {
       await interaction.message
         .edit({
-          embeds: [buildApplicationEmbed(row, applicant)],
+          embeds: [buildApplicationEmbed(row, applicant, linked?.minecraftUsername)],
           components: [],
         })
         .catch(() => undefined);
@@ -423,9 +564,13 @@ async function postForReview(
     .catch(() => null);
   if (!channel?.isSendable()) return false;
 
+  // Le pseudo Minecraft n'est pas demandé dans le formulaire : il vient de la
+  // liaison du candidat, ce qui évite une question de plus et une faute de frappe.
+  const linked = await getLinkedAccount(row.userId).catch(() => null);
+
   const message = await channel
     .send({
-      embeds: [buildApplicationEmbed(row, applicant)],
+      embeds: [buildApplicationEmbed(row, applicant, linked?.minecraftUsername)],
       components: [reviewButtons(row.id)],
     })
     .catch((err) => {
