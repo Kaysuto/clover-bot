@@ -233,25 +233,34 @@ const STATUS_META: Record<
 /** Panneau de dépôt : un menu déroulant listant les postes ouverts. */
 export function buildApplicationPanel(open: boolean) {
   const embed = brandEmbed()
-    .setTitle("📝 Rejoindre l'équipe Clover Games")
+    .setTitle("📝 Rejoindre l'équipe")
     .setDescription(
       open
         ? [
-            "Choisis le poste qui te correspond dans le menu ci-dessous, puis remplis le formulaire.",
+            "> Choisis ton poste ci-dessous et remplis le formulaire.",
+            "> Le staff te répond en message privé.",
             "",
-            ...Object.values(APPLICATION_POSITIONS).map(
-              (p) => `${p.emoji} **${p.label}** — ${p.description}`,
-            ),
+            "**Postes ouverts**",
+            Object.values(APPLICATION_POSITIONS)
+              .map((p) => `${p.emoji} ${p.label}`)
+              .join("  ·  "),
             "",
-            `📄 Formulaire complet (portfolio, images, questions détaillées) : ${RECRUITMENT_URL}`,
-            "_Une réponse te sera donnée en message privé. Une seule candidature en cours à la fois._",
+            `Dossier avec portfolio ou captures ? [Formulaire complet](${RECRUITMENT_URL})`,
           ].join("\n")
-        : `🔒 Les candidatures sont **fermées** sur Discord pour le moment.\n\nLe formulaire du site reste consultable : ${RECRUITMENT_URL}`,
-    );
+        : [
+            "> 🔒 Les candidatures sont **fermées** pour le moment.",
+            "> Reviens plus tard, ou tente ta chance sur le site.",
+            "",
+            `[Formulaire du site](${RECRUITMENT_URL})`,
+          ].join("\n"),
+    )
+    .setFooter({
+      text: "Une seule candidature à la fois • Réponse en message privé",
+    });
 
   const menu = new StringSelectMenuBuilder()
     .setCustomId(buildId("cand", "choose"))
-    .setPlaceholder(open ? "Choisis un poste…" : "Candidatures fermées")
+    .setPlaceholder(open ? "Choisis le poste qui te correspond…" : "Candidatures fermées")
     .setDisabled(!open)
     .addOptions(
       Object.entries(APPLICATION_POSITIONS).map(([key, p]) => ({
