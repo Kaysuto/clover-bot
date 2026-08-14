@@ -751,9 +751,9 @@ const config: Command = {
         .addSubcommand((s) =>
           s
             .setName("role")
-            .setDescription("Rôle du jury, seul à voir les candidatures")
+            .setDescription("Rôle des responsables, seuls à voir les candidatures")
             .addRoleOption((o) =>
-              o.setName("role").setDescription("Rôle du jury").setRequired(true),
+              o.setName("role").setDescription("Rôle des responsables du recrutement").setRequired(true),
             ),
         )
         .addSubcommand((s) =>

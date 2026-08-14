@@ -140,7 +140,7 @@ export const botGuildConfig = pgTable("bot_guild_config", {
   applicationPanelMessageId: text("application_panel_message_id"),
   /** Catégorie accueillant les salons privés de candidature. */
   applicationCategoryId: text("application_category_id"),
-  /** Rôle du jury : seul à voir les salons de candidature et à décider. */
+  /** Rôle des responsables du recrutement : seuls à voir les salons de candidature et à décider. */
   applicationRoleId: text("application_role_id"),
   /** Salon d'archives : transcript et récapitulatif à la clôture. */
   applicationReviewChannelId: text("application_review_channel_id"),
@@ -589,7 +589,7 @@ export const botApplications = pgTable(
     status: text("status").notNull().default("PENDING"),
     /** Numéro affiché dans le nom du salon (candidature-0007). */
     applicationNumber: integer("application_number").notNull().default(0),
-    /** Salon privé candidat ↔ jury ; null une fois la candidature archivée. */
+    /** Salon privé candidat ↔ responsables ; null une fois la candidature archivée. */
     channelId: text("channel_id"),
     messageId: text("message_id"),
     reviewedBy: text("reviewed_by"),

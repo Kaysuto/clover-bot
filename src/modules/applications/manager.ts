@@ -264,7 +264,7 @@ export function buildApplicationPanel(open: boolean) {
       open
         ? [
             "> Choisis ton poste ci-dessous et remplis le formulaire.",
-            "> Un salon privé s'ouvre ensuite entre toi et le jury.",
+            "> Un salon privé s'ouvre ensuite avec un responsable.",
             "",
             "**Postes ouverts**",
             Object.values(APPLICATION_POSITIONS)
@@ -281,7 +281,11 @@ export function buildApplicationPanel(open: boolean) {
           ].join("\n"),
     )
     .setFooter({
-      text: "Une seule candidature à la fois • Un salon privé avec le jury sera créé",
+      // Annoncer la création d'un salon n'a aucun sens quand rien ne peut être
+      // déposé : le pied de page suit l'état du panneau.
+      text: open
+        ? "Une seule candidature à la fois • Un salon privé avec un responsable sera créé"
+        : "Le panneau se rouvrira ici même • Aucune candidature n'est perdue",
     });
 
   const menu = new StringSelectMenuBuilder()
@@ -369,7 +373,7 @@ function buildQuestionField(question: Question, index: number): LabelBuilder {
         .setRequired(true)
         .addOptions(
           // La valeur est le libellé lui-même : la réponse stockée reste
-          // lisible telle quelle dans l'embed vu par le jury.
+          // lisible telle quelle dans l'embed vu par les responsables.
           question.choices.map((choice) => ({
             label: choice.slice(0, 100),
             value: choice.slice(0, 100),
@@ -524,7 +528,7 @@ export const handleApplicationComponent: ComponentHandler = async (
       embeds: [
         opened.ok
           ? successEmbed(
-              `Candidature **#${row.applicationNumber}** envoyée : <#${opened.channelId}>. Le jury t'y répondra.`,
+              `Candidature **#${row.applicationNumber}** envoyée : <#${opened.channelId}>. Un responsable t'y répondra.`,
             )
           : errorEmbed(opened.error),
       ],
@@ -625,7 +629,7 @@ export const handleApplicationComponent: ComponentHandler = async (
           ? `Bravo ! Ta candidature au poste de **${position?.label ?? row.position}** a été acceptée. 🍀`
           : `Ta candidature au poste de **${position?.label ?? row.position}** n'a pas été retenue cette fois-ci.`,
       )
-      .addFields({ name: "Message du jury", value: reason ?? "Aucun message" });
+      .addFields({ name: "Message du responsable", value: reason ?? "Aucun message" });
 
     // La décision est d'abord annoncée dans le salon — c'est là que le candidat
     // l'a suivie. Le message privé n'est qu'un doublon de courtoisie, et il
@@ -666,12 +670,12 @@ function applicationChannelName(number: number, position: string): string {
 }
 
 /**
- * Ouvre le salon privé de la candidature : le candidat, le jury et le bot.
+ * Ouvre le salon privé de la candidature : le candidat, les responsables et le bot.
  *
  * Même principe qu'un ticket — un fil de discussion dédié plutôt qu'un
  * aller-retour en message privé — mais avec sa propre catégorie et son propre
  * rôle : un candidat ne doit pas voir passer les tickets de support, et le
- * jury n'est pas forcément l'équipe support.
+ * responsable du recrutement n'est pas forcément l'équipe support.
  */
 async function openApplicationChannel(
   guild: Guild,
