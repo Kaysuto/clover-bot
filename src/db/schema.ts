@@ -138,8 +138,14 @@ export const botGuildConfig = pgTable("bot_guild_config", {
   // Candidatures staff
   applicationPanelChannelId: text("application_panel_channel_id"),
   applicationPanelMessageId: text("application_panel_message_id"),
-  /** Salon où le staff reçoit et décide des candidatures. */
+  /** Catégorie accueillant les salons privés de candidature. */
+  applicationCategoryId: text("application_category_id"),
+  /** Rôle du jury : seul à voir les salons de candidature et à décider. */
+  applicationRoleId: text("application_role_id"),
+  /** Salon d'archives : transcript et récapitulatif à la clôture. */
   applicationReviewChannelId: text("application_review_channel_id"),
+  /** Numérotation des salons de candidature (incrément atomique). */
+  applicationCounter: integer("application_counter").notNull().default(0),
   applicationsOpen: boolean("applications_open").notNull().default(false),
 
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -581,6 +587,10 @@ export const botApplications = pgTable(
     /** Réponses au formulaire, dans l'ordre des questions. */
     answers: text("answers").array().notNull().default(sql`'{}'::text[]`),
     status: text("status").notNull().default("PENDING"),
+    /** Numéro affiché dans le nom du salon (candidature-0007). */
+    applicationNumber: integer("application_number").notNull().default(0),
+    /** Salon privé candidat ↔ jury ; null une fois la candidature archivée. */
+    channelId: text("channel_id"),
     messageId: text("message_id"),
     reviewedBy: text("reviewed_by"),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),

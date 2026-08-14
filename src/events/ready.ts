@@ -3,7 +3,10 @@ import { touchHeartbeat } from "../lib/heartbeat";
 import { logger } from "../lib/logger";
 import { registerJob } from "../lib/scheduler";
 import { seedServers } from "../lib/servers";
-import { refreshApplicationPanels } from "../modules/applications/manager";
+import {
+  reconcileApplications,
+  refreshApplicationPanels,
+} from "../modules/applications/manager";
 import { tickGiveaways } from "../modules/giveaways/manager";
 import { syncGuildInvites } from "../modules/invites/cache";
 import { tickInviteRewards } from "../modules/invites/rewards";
@@ -55,6 +58,9 @@ const ready: EventHandler<"clientReady"> = {
     );
     await refreshApplicationPanels(client).catch((err) =>
       logger.error({ err }, "Actualisation des panneaux de candidatures impossible"),
+    );
+    await reconcileApplications(client).catch((err) =>
+      logger.error({ err }, "Archivage différé des candidatures impossible"),
     );
 
     // Jobs périodiques — tous relisent la DB, donc reprise automatique

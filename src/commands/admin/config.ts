@@ -738,12 +738,32 @@ const config: Command = {
         )
         .addSubcommand((s) =>
           s
-            .setName("salon-staff")
-            .setDescription("Salon où le staff reçoit les candidatures")
+            .setName("categorie")
+            .setDescription("Catégorie où créer les salons de candidature")
+            .addChannelOption((o) =>
+              o
+                .setName("categorie")
+                .setDescription("Catégorie des candidatures")
+                .setRequired(true)
+                .addChannelTypes(ChannelType.GuildCategory),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("role")
+            .setDescription("Rôle du jury, seul à voir les candidatures")
+            .addRoleOption((o) =>
+              o.setName("role").setDescription("Rôle du jury").setRequired(true),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("archives")
+            .setDescription("Salon où archiver les candidatures traitées")
             .addChannelOption((o) =>
               o
                 .setName("salon")
-                .setDescription("Salon du staff")
+                .setDescription("Salon d'archives")
                 .setRequired(true)
                 .addChannelTypes(ChannelType.GuildText),
             ),
@@ -1530,12 +1550,30 @@ const config: Command = {
         });
         return;
       }
-      case "candidatures/salon-staff": {
+      case "candidatures/categorie": {
+        const categorie = interaction.options.getChannel("categorie", true);
+        await updateGuildConfig(guildId, { applicationCategoryId: categorie.id });
+        await reply(
+          interaction,
+          `Les salons de candidature seront créés dans **${categorie.name}**.`,
+        );
+        return;
+      }
+      case "candidatures/role": {
+        const role = interaction.options.getRole("role", true);
+        await updateGuildConfig(guildId, { applicationRoleId: role.id });
+        await reply(
+          interaction,
+          `${role} verra les salons de candidature et pourra décider.`,
+        );
+        return;
+      }
+      case "candidatures/archives": {
         const salon = interaction.options.getChannel("salon", true);
         await updateGuildConfig(guildId, { applicationReviewChannelId: salon.id });
         await reply(
           interaction,
-          `Les candidatures seront envoyées dans <#${salon.id}>.`,
+          `Les candidatures traitées seront archivées dans <#${salon.id}> (transcript compris).`,
         );
         return;
       }

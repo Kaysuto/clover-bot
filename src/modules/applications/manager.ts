@@ -2,22 +2,30 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ChannelType,
   type EmbedBuilder,
   type Guild,
   MessageFlags,
   ModalBuilder,
   PermissionFlagsBits,
   StringSelectMenuBuilder,
+  type TextChannel,
   TextInputBuilder,
   TextInputStyle,
   type User,
 } from "discord.js";
-import { and, eq } from "drizzle-orm";
+import { createTranscript } from "discord-html-transcripts";
+import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import type { CloverClient } from "../../client";
 import { env } from "../../config";
 import { db } from "../../db";
-import { getGuildConfig, updateGuildConfig } from "../../db/guild-config";
-import { botApplications } from "../../db/schema";
+import {
+  getGuildConfig,
+  invalidateGuildConfig,
+  updateGuildConfig,
+} from "../../db/guild-config";
+import { botApplications, botGuildConfig } from "../../db/schema";
+import { formatDuration } from "../../lib/duration";
 import {
   BRAND_COLOR,
   ERROR_COLOR,
@@ -221,6 +229,14 @@ export const APPLICATION_POSITIONS: Record<string, Position> = {
 /** Formulaire complet du site, seul à accepter portfolios et captures. */
 const RECRUITMENT_URL = `${env.WEBSITE_URL.replace(/\/$/, "")}/recruitment`;
 
+/**
+ * Délai entre la décision et la suppression du salon, pour laisser le candidat
+ * lire le verdict. Court volontairement : un redémarrage pendant ce laps de
+ * temps laisserait le salon en place, et c'est `reconcileApplications` qui le
+ * rattrape au démarrage suivant.
+ */
+const ARCHIVE_DELAY_MS = 15_000;
+
 const STATUS_META: Record<
   ApplicationStatus,
   { label: string; icon: string; color: number }
@@ -238,7 +254,7 @@ export function buildApplicationPanel(open: boolean) {
       open
         ? [
             "> Choisis ton poste ci-dessous et remplis le formulaire.",
-            "> Le staff te répond en message privé.",
+            "> Un salon privé s'ouvre ensuite entre toi et le jury.",
             "",
             "**Postes ouverts**",
             Object.values(APPLICATION_POSITIONS)
@@ -255,7 +271,7 @@ export function buildApplicationPanel(open: boolean) {
           ].join("\n"),
     )
     .setFooter({
-      text: "Une seule candidature à la fois • Réponse en message privé",
+      text: "Une seule candidature à la fois • Un salon privé avec le jury sera créé",
     });
 
   const menu = new StringSelectMenuBuilder()
@@ -345,6 +361,7 @@ export const handleApplicationComponent: ComponentHandler = async (
   interaction,
   action,
   args,
+  client,
 ) => {
   const cfg = await getGuildConfig(interaction.guild.id);
 
@@ -423,6 +440,15 @@ export const handleApplicationComponent: ComponentHandler = async (
       interaction.fields.getTextInputValue(`q${i}`),
     );
 
+    // Numérotation atomique, comme les tickets : l'incrément passe hors de
+    // `updateGuildConfig`, qui écraserait la valeur avec une lecture antérieure.
+    const [counter] = await db
+      .update(botGuildConfig)
+      .set({ applicationCounter: sql`${botGuildConfig.applicationCounter} + 1` })
+      .where(eq(botGuildConfig.guildId, interaction.guild.id))
+      .returning({ n: botGuildConfig.applicationCounter });
+    invalidateGuildConfig(interaction.guild.id);
+
     const [row] = await db
       .insert(botApplications)
       .values({
@@ -430,6 +456,7 @@ export const handleApplicationComponent: ComponentHandler = async (
         userId: interaction.user.id,
         position: key,
         answers,
+        applicationNumber: counter?.n ?? 1,
       })
       .returning();
     if (!row) {
@@ -439,16 +466,19 @@ export const handleApplicationComponent: ComponentHandler = async (
       return;
     }
 
-    const posted = await postForReview(interaction.guild, row, interaction.user);
+    const opened = await openApplicationChannel(
+      interaction.guild,
+      client,
+      row,
+      interaction.user,
+    );
     await interaction.editReply({
       embeds: [
-        posted
+        opened.ok
           ? successEmbed(
-              `Candidature **#${row.id}** envoyée ! Tu recevras la réponse en message privé.`,
+              `Candidature **#${row.applicationNumber}** envoyée : <#${opened.channelId}>. Le jury t'y répondra.`,
             )
-          : errorEmbed(
-              `Candidature **#${row.id}** enregistrée, mais le salon du staff n'est pas configuré (\`/config candidatures salon-staff\`).`,
-            ),
+          : errorEmbed(opened.error),
       ],
     });
     return;
@@ -514,7 +544,7 @@ export const handleApplicationComponent: ComponentHandler = async (
     await interaction.reply({
       embeds: [
         successEmbed(
-          `Candidature **#${id}** ${status === "ACCEPTED" ? "acceptée" : "refusée"}.`,
+          `Candidature **#${row.applicationNumber}** ${status === "ACCEPTED" ? "acceptée" : "refusée"}. Le salon sera archivé dans quelques secondes.`,
         ),
       ],
       flags: MessageFlags.Ephemeral,
@@ -535,64 +565,251 @@ export const handleApplicationComponent: ComponentHandler = async (
 
     const meta = STATUS_META[status];
     const position = APPLICATION_POSITIONS[row.position];
-    await applicant
-      ?.send({
-        embeds: [
-          brandEmbed()
-            .setColor(meta.color)
-            .setAuthor({
-              name: interaction.guild.name,
-              iconURL: interaction.guild.iconURL() ?? undefined,
-            })
-            .setTitle(`${meta.icon} Candidature ${meta.label.toLowerCase()}`)
-            .setDescription(
-              status === "ACCEPTED"
-                ? `Bravo ! Ta candidature au poste de **${position?.label ?? row.position}** a été acceptée. 🍀`
-                : `Ta candidature au poste de **${position?.label ?? row.position}** n'a pas été retenue cette fois-ci.`,
-            )
-            .addFields({ name: "Message du staff", value: reason ?? "Aucun message" }),
-        ],
+    const verdict = brandEmbed()
+      .setColor(meta.color)
+      .setAuthor({
+        name: interaction.guild.name,
+        iconURL: interaction.guild.iconURL() ?? undefined,
       })
+      .setTitle(`${meta.icon} Candidature ${meta.label.toLowerCase()}`)
+      .setDescription(
+        status === "ACCEPTED"
+          ? `Bravo ! Ta candidature au poste de **${position?.label ?? row.position}** a été acceptée. 🍀`
+          : `Ta candidature au poste de **${position?.label ?? row.position}** n'a pas été retenue cette fois-ci.`,
+      )
+      .addFields({ name: "Message du jury", value: reason ?? "Aucun message" });
+
+    // La décision est d'abord annoncée dans le salon — c'est là que le candidat
+    // l'a suivie. Le message privé n'est qu'un doublon de courtoisie, et il
+    // échoue silencieusement si le candidat ferme ses MP.
+    const channel = row.channelId
+      ? await interaction.guild.channels.fetch(row.channelId).catch(() => null)
+      : null;
+    if (channel?.isSendable()) {
+      await channel
+        .send({ content: `<@${row.userId}>`, embeds: [verdict] })
+        .catch(() => undefined);
+    }
+    await applicant
+      ?.send({ embeds: [verdict] })
       .catch(() =>
         logger.debug({ userId: row.userId }, "Décision non notifiée (MP fermés ?)"),
       );
+
+    // Laisse le temps de lire avant l'archivage et la suppression du salon.
+    if (channel?.isTextBased() && !channel.isDMBased()) {
+      const target = channel as TextChannel;
+      setTimeout(() => {
+        void archiveApplication(target, { ...row, status }, interaction.user.id).catch(
+          (err) => logger.error({ err, application: row.id }, "Archivage impossible"),
+        );
+      }, ARCHIVE_DELAY_MS);
+    }
   }
 };
 
-/** Publie la candidature dans le salon du staff, avec les boutons de décision. */
-async function postForReview(
+/** Nom du salon d'une candidature, sur le modèle des tickets. */
+function applicationChannelName(number: number, position: string): string {
+  const label = APPLICATION_POSITIONS[position]?.label ?? position;
+  return `candidature-${String(number).padStart(4, "0")}-${label.toLowerCase()}`.slice(
+    0,
+    100,
+  );
+}
+
+/**
+ * Ouvre le salon privé de la candidature : le candidat, le jury et le bot.
+ *
+ * Même principe qu'un ticket — un fil de discussion dédié plutôt qu'un
+ * aller-retour en message privé — mais avec sa propre catégorie et son propre
+ * rôle : un candidat ne doit pas voir passer les tickets de support, et le
+ * jury n'est pas forcément l'équipe support.
+ */
+async function openApplicationChannel(
   guild: Guild,
+  client: CloverClient,
   row: ApplicationRow,
   applicant: User,
-): Promise<boolean> {
+): Promise<{ ok: true; channelId: string } | { ok: false; error: string }> {
   const cfg = await getGuildConfig(guild.id);
-  if (!cfg.applicationReviewChannelId) return false;
+  if (!cfg.applicationCategoryId || !cfg.applicationRoleId) {
+    return {
+      ok: false,
+      error:
+        "Le recrutement n'est pas entièrement configuré (`/config candidatures categorie` et `role`).",
+    };
+  }
+
+  const allow = [
+    PermissionFlagsBits.ViewChannel,
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.ReadMessageHistory,
+    PermissionFlagsBits.AttachFiles,
+    PermissionFlagsBits.EmbedLinks,
+  ];
 
   const channel = await guild.channels
-    .fetch(cfg.applicationReviewChannelId)
-    .catch(() => null);
-  if (!channel?.isSendable()) return false;
+    .create({
+      name: applicationChannelName(row.applicationNumber, row.position),
+      type: ChannelType.GuildText,
+      parent: cfg.applicationCategoryId,
+      reason: `Candidature de @${applicant.username}`,
+      permissionOverwrites: [
+        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+        { id: row.userId, allow },
+        { id: cfg.applicationRoleId, allow },
+        {
+          id: client.user!.id,
+          allow: [...allow, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ManageMessages],
+        },
+      ],
+    })
+    .catch((err) => {
+      logger.warn({ err, application: row.id }, "Salon de candidature non créé");
+      return null;
+    });
+  if (!channel) {
+    return { ok: false, error: "Je n'ai pas pu créer le salon de ta candidature." };
+  }
 
   // Le pseudo Minecraft n'est pas demandé dans le formulaire : il vient de la
   // liaison du candidat, ce qui évite une question de plus et une faute de frappe.
   const linked = await getLinkedAccount(row.userId).catch(() => null);
 
-  const message = await channel
-    .send({
-      embeds: [buildApplicationEmbed(row, applicant, linked?.minecraftUsername)],
-      components: [reviewButtons(row.id)],
-    })
-    .catch((err) => {
-      logger.warn({ err, application: row.id }, "Publication de la candidature impossible");
-      return null;
-    });
-  if (!message) return false;
+  const message = await channel.send({
+    content: `${applicant} · <@&${cfg.applicationRoleId}>`,
+    embeds: [buildApplicationEmbed(row, applicant, linked?.minecraftUsername)],
+    components: [reviewButtons(row.id)],
+  });
 
   await db
     .update(botApplications)
-    .set({ messageId: message.id })
+    .set({ channelId: channel.id, messageId: message.id })
     .where(eq(botApplications.id, row.id));
-  return true;
+
+  return { ok: true, channelId: channel.id };
+}
+
+/**
+ * Archive puis supprime le salon d'une candidature décidée.
+ *
+ * Comme pour les tickets, le transcript part AVANT toute suppression : si
+ * l'archivage échoue, le salon reste en place plutôt que de perdre l'échange.
+ */
+async function archiveApplication(
+  channel: TextChannel,
+  row: ApplicationRow,
+  decidedBy: string,
+): Promise<void> {
+  const cfg = await getGuildConfig(row.guildId);
+  const position = APPLICATION_POSITIONS[row.position];
+  const meta = STATUS_META[row.status as ApplicationStatus] ?? STATUS_META.PENDING;
+  const name = applicationChannelName(row.applicationNumber, row.position);
+
+  if (!cfg.applicationReviewChannelId) {
+    logger.warn(
+      { application: row.id },
+      "Aucun salon d'archives : le salon de candidature reste ouvert",
+    );
+    return;
+  }
+
+  let transcript;
+  try {
+    transcript = await createTranscript(channel, {
+      limit: -1,
+      filename: `${name}.html`,
+      saveImages: true,
+      poweredBy: false,
+    });
+  } catch (err) {
+    logger.error({ err, application: row.id }, "Transcript de candidature impossible");
+    return;
+  }
+
+  const archive = await channel.guild.channels
+    .fetch(cfg.applicationReviewChannelId)
+    .catch(() => null);
+  if (!archive?.isSendable()) {
+    logger.warn({ application: row.id }, "Salon d'archives introuvable");
+    return;
+  }
+
+  const recap = brandEmbed()
+    .setColor(meta.color)
+    .setTitle(`📁 ${name} — ${meta.icon} ${meta.label}`)
+    .addFields(
+      { name: "Candidat", value: `<@${row.userId}>`, inline: true },
+      {
+        name: "Poste",
+        value: `${position?.emoji ?? "📝"} ${position?.label ?? row.position}`,
+        inline: true,
+      },
+      { name: "Décidé par", value: `<@${decidedBy}>`, inline: true },
+      {
+        name: "Durée d'examen",
+        value: formatDuration(Date.now() - row.createdAt.getTime()),
+        inline: true,
+      },
+      ...(row.decisionReason
+        ? [{ name: "Message au candidat", value: row.decisionReason.slice(0, 1024) }]
+        : []),
+    )
+    .setTimestamp();
+
+  try {
+    await archive.send({ embeds: [recap], files: [transcript] });
+  } catch (err) {
+    logger.error({ err, application: row.id }, "Archivage de la candidature impossible");
+    return;
+  }
+
+  await db
+    .update(botApplications)
+    .set({ channelId: null })
+    .where(eq(botApplications.id, row.id));
+
+  await channel
+    .delete(`Candidature #${row.id} traitée`)
+    .catch((err) => logger.warn({ err }, "Suppression du salon de candidature impossible"));
+}
+
+/**
+ * Au démarrage : archive les candidatures déjà décidées dont le salon existe
+ * encore. C'est le filet du délai de 15 s — si le bot est tombé entre la
+ * décision et la suppression, le salon serait resté indéfiniment.
+ */
+export async function reconcileApplications(client: CloverClient): Promise<void> {
+  const pending = await db
+    .select()
+    .from(botApplications)
+    .where(
+      and(ne(botApplications.status, "PENDING"), isNotNull(botApplications.channelId)),
+    );
+
+  for (const row of pending) {
+    const guild = client.guilds.cache.get(row.guildId);
+    if (!guild) continue;
+
+    const channel = await guild.channels.fetch(row.channelId!).catch(() => null);
+    if (!channel) {
+      // Salon supprimé à la main : on nettoie simplement la référence.
+      await db
+        .update(botApplications)
+        .set({ channelId: null })
+        .where(eq(botApplications.id, row.id));
+      continue;
+    }
+    if (!channel.isTextBased() || channel.isDMBased()) continue;
+
+    await archiveApplication(
+      channel as TextChannel,
+      row,
+      row.reviewedBy ?? client.user!.id,
+    ).catch((err) =>
+      logger.error({ err, application: row.id }, "Archivage différé impossible"),
+    );
+  }
 }
 
 /**
