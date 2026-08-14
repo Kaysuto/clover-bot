@@ -1,0 +1,1 @@
+ALTER TABLE "bot_guild_config" ALTER COLUMN "invite_credits" SET DEFAULT 3;

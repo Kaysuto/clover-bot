@@ -117,8 +117,13 @@ export const botGuildConfig = pgTable("bot_guild_config", {
   inviteChannelId: text("invite_channel_id"),
   /** XP versée au parrain quand l'invitation est validée (0 = désactivé). */
   inviteXp: integer("invite_xp").notNull().default(250),
-  /** Crédits versés par invitation validée (0 = désactivé). */
-  inviteCredits: integer("invite_credits").notNull().default(0),
+  /**
+   * Crédits versés par invitation validée (0 = désactivé). 3 crédits = 3 h de
+   * jeu actif sur l'échelle du module `economy` — assez pour motiver, trop peu
+   * pour rentabiliser la création de comptes. Aucun versement n'a lieu tant
+   * que `SITE_API_URL`/`SITE_API_TOKEN` sont absents.
+   */
+  inviteCredits: integer("invite_credits").notNull().default(3),
   /** Délai de maturation avant récompense, en jours. */
   inviteMaturityDays: integer("invite_maturity_days").notNull().default(7),
   /** Âge minimal du compte Discord du filleul à son arrivée, en jours. */

@@ -45,6 +45,34 @@ export function getInviteTiers(guildId: string) {
     .orderBy(asc(botInviteTiers.threshold));
 }
 
+/**
+ * Paliers par défaut, calibrés sur l'échelle du module `economy` : cent
+ * filleuls réels rapportent ~1 110 crédits, l'ordre de grandeur d'un Prestige.
+ * Semés une seule fois par guilde — un palier supprimé à la main ne revient pas.
+ */
+const DEFAULT_TIERS = [
+  { threshold: 5, credits: 10 },
+  { threshold: 10, credits: 25 },
+  { threshold: 25, credits: 75 },
+  { threshold: 50, credits: 200 },
+  { threshold: 100, credits: 500 },
+];
+
+export async function seedInviteTiers(guildId: string): Promise<void> {
+  const [existing] = await db
+    .select({ id: botInviteTiers.id })
+    .from(botInviteTiers)
+    .where(eq(botInviteTiers.guildId, guildId))
+    .limit(1);
+  if (existing) return;
+
+  await db
+    .insert(botInviteTiers)
+    .values(DEFAULT_TIERS.map((tier) => ({ guildId, ...tier })))
+    .onConflictDoNothing();
+  logger.info({ guildId }, "Paliers de parrainage par défaut créés");
+}
+
 /** Invitations déjà validées pour ce parrain (sert aussi aux paliers). */
 async function validatedCount(guildId: string, inviterId: string): Promise<number> {
   const [row] = await db
@@ -305,6 +333,10 @@ export async function tickInviteRewards(client: CloverClient): Promise<void> {
   for (const guild of client.guilds.cache.values()) {
     const cfg = await getGuildConfig(guild.id);
     if (cfg.inviteXp <= 0 && cfg.inviteCredits <= 0) continue;
+
+    await seedInviteTiers(guild.id).catch((err) =>
+      logger.warn({ err, guildId: guild.id }, "Paliers par défaut non créés"),
+    );
 
     const cutoff = new Date(Date.now() - cfg.inviteMaturityDays * 86_400_000);
     const due = await db
