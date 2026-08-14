@@ -5,8 +5,10 @@ import {
   ChannelType,
   type EmbedBuilder,
   type Guild,
+  LabelBuilder,
   MessageFlags,
   ModalBuilder,
+  type ModalSubmitInteraction,
   PermissionFlagsBits,
   StringSelectMenuBuilder,
   type TextChannel,
@@ -44,10 +46,16 @@ export type ApplicationStatus = "PENDING" | "ACCEPTED" | "REFUSED";
 interface Question {
   /** Libellé du champ : 45 caractères au maximum (limite Discord). */
   label: string;
-  /** Reformulation complète de la question : 100 caractères au maximum. */
+  /** Reformulation complète, affichée sous le libellé (100 caractères max). */
   hint: string;
   /** Champ multiligne (les questions ouvertes) plutôt que ligne simple. */
   long?: boolean;
+  /**
+   * Réponses proposées en liste déroulante au lieu d'un champ libre. Réservé
+   * aux questions fermées du site (`type: "radio"`) : une réponse normalisée
+   * se compare d'un dossier à l'autre, un champ libre non.
+   */
+  choices?: string[];
 }
 
 interface Position {
@@ -66,7 +74,9 @@ interface Position {
 const COMMON_QUESTIONS: Question[] = [
   {
     label: "Temps disponible par semaine",
-    hint: "Moins de 5h, 5 à 10h, 10 à 20h ou plus — mieux vaut peu mais régulier.",
+    hint: "Sois honnête : mieux vaut peu de temps mais régulier qu'une promesse intenable.",
+    // Mêmes paliers que le formulaire du site, pour que les deux se comparent.
+    choices: ["Moins de 5h", "5 à 10h", "10 à 20h", "Plus de 20h"],
   },
   {
     label: "Sanctions déjà reçues",
@@ -341,6 +351,54 @@ export function buildApplicationEmbed(
   return embed;
 }
 
+/**
+ * Un champ du formulaire. Le composant `Label` porte le libellé et la
+ * reformulation ; il enveloppe soit une liste déroulante (questions fermées),
+ * soit un champ texte.
+ */
+function buildQuestionField(question: Question, index: number): LabelBuilder {
+  const label = new LabelBuilder()
+    .setLabel(question.label.slice(0, 45))
+    .setDescription(question.hint.slice(0, 100));
+
+  if (question.choices) {
+    return label.setStringSelectMenuComponent(
+      new StringSelectMenuBuilder()
+        .setCustomId(`q${index}`)
+        .setPlaceholder("Choisis une réponse…")
+        .setRequired(true)
+        .addOptions(
+          // La valeur est le libellé lui-même : la réponse stockée reste
+          // lisible telle quelle dans l'embed vu par le jury.
+          question.choices.map((choice) => ({
+            label: choice.slice(0, 100),
+            value: choice.slice(0, 100),
+          })),
+        ),
+    );
+  }
+
+  return label.setTextInputComponent(
+    new TextInputBuilder()
+      .setCustomId(`q${index}`)
+      .setStyle(question.long ? TextInputStyle.Paragraph : TextInputStyle.Short)
+      .setRequired(true)
+      .setMaxLength(question.long ? 1_000 : 200),
+  );
+}
+
+/** Réponse saisie, quelle que soit la nature du champ. */
+function readAnswer(
+  interaction: ModalSubmitInteraction,
+  question: Question,
+  index: number,
+): string {
+  if (question.choices) {
+    return interaction.fields.getStringSelectValues(`q${index}`)[0] ?? "—";
+  }
+  return interaction.fields.getTextInputValue(`q${index}`);
+}
+
 function reviewButtons(id: number): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
@@ -405,18 +463,8 @@ export const handleApplicationComponent: ComponentHandler = async (
       new ModalBuilder()
         .setCustomId(buildId("cand", "submit", key))
         .setTitle(`Candidature — ${position.label}`.slice(0, 45))
-        .addComponents(
-          position.questions.map((question, i) =>
-            new ActionRowBuilder<TextInputBuilder>().addComponents(
-              new TextInputBuilder()
-                .setCustomId(`q${i}`)
-                .setLabel(question.label.slice(0, 45))
-                .setPlaceholder(question.hint.slice(0, 100))
-                .setStyle(question.long ? TextInputStyle.Paragraph : TextInputStyle.Short)
-                .setRequired(true)
-                .setMaxLength(question.long ? 1_000 : 200),
-            ),
-          ),
+        .addLabelComponents(
+          position.questions.map((question, i) => buildQuestionField(question, i)),
         ),
     );
 
@@ -436,8 +484,8 @@ export const handleApplicationComponent: ComponentHandler = async (
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    const answers = position.questions.map((_, i) =>
-      interaction.fields.getTextInputValue(`q${i}`),
+    const answers = position.questions.map((question, i) =>
+      readAnswer(interaction, question, i),
     );
 
     // Numérotation atomique, comme les tickets : l'incrément passe hors de
