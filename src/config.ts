@@ -54,7 +54,7 @@ const envSchema = z.object({
   VOTE_HTTP_PORT: optionalPort,
   VOTE_TOKEN: optionalString,
 
-  // Endpoints internes du site (crédits, boutique) — cf. lib/site-api.ts
+  // Endpoints internes du site (pièces, boutique) — cf. lib/site-api.ts
   SITE_API_URL: optionalString,
   SITE_API_TOKEN: optionalString,
 
@@ -91,5 +91,5 @@ export const luckPermsConfigured = Boolean(
 /** Réception des votes : le jeton partagé est obligatoire, sinon l'endpoint reste fermé. */
 export const voteEndpointConfigured = Boolean(env.VOTE_HTTP_PORT && env.VOTE_TOKEN);
 
-/** Crédits et boutique : sans ces deux variables, le bot ne parle pas d'argent. */
+/** Pièces et boutique : sans ces deux variables, le bot ne parle pas d'argent. */
 export const siteApiConfigured = Boolean(env.SITE_API_URL && env.SITE_API_TOKEN);

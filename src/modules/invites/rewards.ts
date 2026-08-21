@@ -21,7 +21,7 @@ export type InviteJoinRow = typeof botInviteJoins.$inferSelect;
 /**
  * Récompense du parrainage — la partie sensible du module.
  *
- * Un crédit vaut 0,01 € : payer une invitation, c'est payer la création d'un
+ * Une pièce vaut 0,01 € : payer une invitation, c'est payer la création d'un
  * compte. Rien n'est versé à l'arrivée. Chaque ligne mûrit pendant
  * `inviteMaturityDays`, puis n'est validée que si le filleul est encore là,
  * que son compte Discord était déjà ancien à son arrivée, qu'il a prouvé une
@@ -47,7 +47,7 @@ export function getInviteTiers(guildId: string) {
 
 /**
  * Paliers par défaut, calibrés sur l'échelle du module `economy` : cent
- * filleuls réels rapportent ~1 110 crédits, l'ordre de grandeur d'un Prestige.
+ * filleuls réels rapportent ~1 110 pièces, l'ordre de grandeur d'un Prestige.
  * Semés une seule fois par guilde — un palier supprimé à la main ne revient pas.
  */
 const DEFAULT_TIERS = [
@@ -194,10 +194,10 @@ interface RewardOutcome {
 }
 
 /**
- * Verse crédits puis XP pour une invitation validée, paliers compris.
+ * Verse pièces puis XP pour une invitation validée, paliers compris.
  *
- * L'ordre n'est pas anodin : le versement de crédits est idempotent (clé côté
- * site) donc rejouable, l'XP ne l'est pas. En payant les crédits d'abord, un
+ * L'ordre n'est pas anodin : le versement de pièces est idempotent (clé côté
+ * site) donc rejouable, l'XP ne l'est pas. En payant les pièces d'abord, un
  * site injoignable laisse la ligne intacte et réessayable ; l'inverse aurait
  * doublé l'XP à chaque tentative.
  */
@@ -221,7 +221,7 @@ async function payout(
     } else {
       logger.warn(
         { inviterId, join: row.id, error: result.error },
-        "Crédits de parrainage non versés — réessai au prochain tour",
+        "Pièces de parrainage non versés — réessai au prochain tour",
       );
       outcome.retry = true;
       return outcome;
@@ -296,11 +296,11 @@ async function notifyInviter(
 ): Promise<void> {
   const lines = [`🎉 Ton invitation a été validée sur **${guild.name}** !`];
   if (outcome.xp) lines.push(`✨ +**${outcome.xp}** XP`);
-  if (outcome.credits) lines.push(`🪙 +**${outcome.credits}** crédits`);
+  if (outcome.credits) lines.push(`🪙 +**${outcome.credits}** pièces`);
   for (const tier of outcome.tiers) {
     lines.push(
       tier.credits
-        ? `🏆 Palier **${tier.threshold} parrainages** atteint : +**${tier.credits}** crédits`
+        ? `🏆 Palier **${tier.threshold} parrainages** atteint : +**${tier.credits}** pièces`
         : `🏆 Palier **${tier.threshold} parrainages** atteint !`,
     );
   }
@@ -368,7 +368,7 @@ export async function tickInviteRewards(client: CloverClient): Promise<void> {
 
         // Marquée AVANT le versement : c'est ce qui empêche l'XP, non
         // idempotente, d'être versée deux fois si le bot tombe en cours de
-        // route. Le versement des crédits, lui, est rejouable sans risque.
+        // route. Le versement des pièces, lui, est rejouable sans risque.
         await db
           .update(botInviteJoins)
           .set({ rewardStatus: "REWARDED", rewardedAt: new Date() })

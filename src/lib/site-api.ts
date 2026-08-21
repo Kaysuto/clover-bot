@@ -109,7 +109,7 @@ export function purchase(
 }
 
 /**
- * Verse des crédits. `key` doit être stable et unique pour la récompense
+ * Verse des pièces. `key` doit être stable et unique pour la récompense
  * concernée : un réessai avec la même clé ne verse pas deux fois.
  */
 export function deposit(input: {

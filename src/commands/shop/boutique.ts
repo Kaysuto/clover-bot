@@ -11,18 +11,18 @@ import type { Command } from "../../types";
 const boutique: Command = {
   data: new SlashCommandBuilder()
     .setName("boutique")
-    .setDescription("Boutique et crédits Clover Games")
+    .setDescription("Boutique et pièces Clover Games")
     .setContexts(InteractionContextType.Guild)
     .addSubcommand((s) =>
-      s.setName("voir").setDescription("Afficher les articles payables en crédits"),
+      s.setName("voir").setDescription("Afficher les articles payables en pièces"),
     )
     .addSubcommand((s) =>
-      s.setName("solde").setDescription("Afficher ton solde de crédits"),
+      s.setName("solde").setDescription("Afficher ton solde de pièces"),
     )
     .addSubcommand((s) =>
       s
         .setName("acheter")
-        .setDescription("Acheter un article avec tes crédits")
+        .setDescription("Acheter un article avec tes pièces")
         .addStringOption((o) =>
           o
             .setName("article")
@@ -48,12 +48,12 @@ const boutique: Command = {
         embeds: [
           balance.ok
             ? brandEmbed()
-                .setTitle("🪙 Tes crédits")
+                .setTitle("🪙 Tes pièces")
                 .setDescription(
-                  `**${balance.data.balance}** crédits sur \`${balance.data.minecraftUsername}\`.`,
+                  `**${balance.data.balance}** pièces sur \`${balance.data.minecraftUsername}\`.`,
                 )
                 .setFooter({
-                  text: "Les crédits se gagnent en jouant, en votant et en parrainant.",
+                  text: "Les pièces se gagnent en jouant, en votant et en parrainant.",
                 })
             : errorEmbed(balance.error),
         ],
@@ -81,7 +81,7 @@ const boutique: Command = {
         .filter((p) => p.name.toLowerCase().includes(focused))
         .slice(0, 25)
         .map((p) => ({
-          name: `${p.name} — ${p.credits} crédits`.slice(0, 100),
+          name: `${p.name} — ${p.credits} pièces`.slice(0, 100),
           value: p.id,
         })),
     );

@@ -118,7 +118,7 @@ export const botGuildConfig = pgTable("bot_guild_config", {
   /** XP versée au parrain quand l'invitation est validée (0 = désactivé). */
   inviteXp: integer("invite_xp").notNull().default(250),
   /**
-   * Crédits versés par invitation validée (0 = désactivé). 3 crédits = 3 h de
+   * Pièces versées par invitation validée (0 = désactivé). 3 pièces = 3 h de
    * jeu actif sur l'échelle du module `economy` — assez pour motiver, trop peu
    * pour rentabiliser la création de comptes. Aucun versement n'a lieu tant
    * que `SITE_API_URL`/`SITE_API_TOKEN` sont absents.
@@ -271,7 +271,7 @@ export const botInviteJoins = pgTable(
     leftAt: timestamp("left_at"),
     /**
      * Cycle de récompense du parrainage :
-     * PENDING → en attente de maturation ; REWARDED → XP et crédits versés ;
+     * PENDING → en attente de maturation ; REWARDED → XP et pièces versées ;
      * REJECTED → conditions non tenues (départ, compte trop jeune, plafond…).
      * `reward_reason` porte le motif du refus, affiché par `/invites`.
      */
@@ -289,7 +289,7 @@ export const botInviteJoins = pgTable(
 );
 
 /**
- * Paliers de récompense : bonus en crédits versé une seule fois quand le
+ * Paliers de récompense : bonus en pièces versé une seule fois quand le
  * parrain atteint `threshold` invitations validées.
  */
 export const botInviteTiers = pgTable(

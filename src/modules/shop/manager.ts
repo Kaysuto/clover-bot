@@ -19,7 +19,7 @@ import type { ComponentHandler } from "../../types";
  * Boutique Discord — vitrine du catalogue du site.
  *
  * Le bot n'a ni catalogue ni solde à lui : il interroge le site, qui reste
- * seul à débiter les crédits, exécuter les commandes RCON du produit et tracer
+ * seul à débiter les pièces, exécuter les commandes RCON du produit et tracer
  * la commande. Ici, on n'écrit rien.
  */
 
@@ -36,7 +36,7 @@ function categoryLabel(category: string): string {
   return CATEGORY_LABELS[category.toLowerCase()] ?? `📦 ${category}`;
 }
 
-/** Vitrine groupée par catégorie, prix en crédits et en euros. */
+/** Vitrine groupée par catégorie, prix en pièces et en euros. */
 export async function buildShopReply(discordId: string) {
   const catalogue = await fetchCatalogue();
   if (!catalogue.ok) {
@@ -44,7 +44,7 @@ export async function buildShopReply(discordId: string) {
   }
   if (!catalogue.data.products.length) {
     return {
-      embeds: [errorEmbed("Aucun article n'est payable en crédits pour le moment.")],
+      embeds: [errorEmbed("Aucun article n'est payable en pièces pour le moment.")],
       flags: MessageFlags.Ephemeral,
     };
   }
@@ -54,7 +54,7 @@ export async function buildShopReply(discordId: string) {
     .setTitle("🛒 Boutique Clover Games")
     .setDescription(
       balance.ok
-        ? `Ton solde : **${balance.data.balance}** crédits (\`${balance.data.minecraftUsername}\`).`
+        ? `Ton solde : **${balance.data.balance}** pièces (\`${balance.data.minecraftUsername}\`).`
         : `⚠️ ${balance.error}`,
     );
 
@@ -71,7 +71,7 @@ export async function buildShopReply(discordId: string) {
       value: products
         .map(
           (p) =>
-            `**${p.name}** — \`${p.credits}\` crédits _(${(p.priceCents / 100).toFixed(2)} €)_`,
+            `**${p.name}** — \`${p.credits}\` pièces _(${(p.priceCents / 100).toFixed(2)} €)_`,
         )
         .join("\n")
         .slice(0, 1_024),
@@ -79,7 +79,7 @@ export async function buildShopReply(discordId: string) {
   }
 
   embed.setFooter({
-    text: "Achat : /acheter article:<nom>. Les crédits se gagnent en jouant, en votant et en parrainant.",
+    text: "Achat : /acheter article:<nom>. Les pièces se gagnent en jouant, en votant et en parrainant.",
   });
 
   return { embeds: [embed], flags: MessageFlags.Ephemeral };
@@ -95,7 +95,7 @@ export async function buildPurchasePrompt(discordId: string, productId: string) 
   const product = catalogue.data.products.find((p) => p.id === productId);
   if (!product) {
     return {
-      embeds: [errorEmbed("Cet article n'existe plus ou n'est pas payable en crédits.")],
+      embeds: [errorEmbed("Cet article n'existe plus ou n'est pas payable en pièces.")],
       flags: MessageFlags.Ephemeral,
     };
   }
@@ -108,7 +108,7 @@ export async function buildPurchasePrompt(discordId: string, productId: string) 
     return {
       embeds: [
         errorEmbed(
-          `Solde insuffisant : **${product.credits}** crédits requis, **${balance.data.balance}** disponibles.`,
+          `Solde insuffisant : **${product.credits}** pièces requises, **${balance.data.balance}** disponibles.`,
         ),
       ],
       flags: MessageFlags.Ephemeral,
@@ -121,11 +121,11 @@ export async function buildPurchasePrompt(discordId: string, productId: string) 
         .setTitle(`🛒 ${product.name}`)
         .setDescription(product.description ?? "Aucune description.")
         .addFields(
-          { name: "Prix", value: `**${product.credits}** crédits`, inline: true },
-          { name: "Ton solde", value: `${balance.data.balance} crédits`, inline: true },
+          { name: "Prix", value: `**${product.credits}** pièces`, inline: true },
+          { name: "Ton solde", value: `${balance.data.balance} pièces`, inline: true },
           {
             name: "Après achat",
-            value: `${balance.data.balance - product.credits} crédits`,
+            value: `${balance.data.balance - product.credits} pièces`,
             inline: true,
           },
         )
@@ -137,7 +137,7 @@ export async function buildPurchasePrompt(discordId: string, productId: string) 
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId(buildId("shop", "buy", product.id))
-          .setLabel(`Acheter pour ${product.credits} crédits`)
+          .setLabel(`Acheter pour ${product.credits} pièces`)
           .setEmoji("🪙")
           .setStyle(ButtonStyle.Success),
       ),
@@ -177,7 +177,7 @@ export const handleShopComponent: ComponentHandler = async (
   await interaction.editReply({
     embeds: [
       successEmbed(
-        `**${result.data.productName}** acheté pour **${result.data.credits}** crédits. Il te reste **${result.data.remaining}** crédits — connecte-toi en jeu pour en profiter. 🍀`,
+        `**${result.data.productName}** acheté pour **${result.data.credits}** pièces. Il te reste **${result.data.remaining}** pièces — connecte-toi en jeu pour en profiter. 🍀`,
       ),
     ],
   });

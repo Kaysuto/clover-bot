@@ -645,7 +645,7 @@ const config: Command = {
         .addSubcommand((s) =>
           s
             .setName("recompenses")
-            .setDescription("XP et crédits versés par invitation validée")
+            .setDescription("XP et pièces versées par invitation validée")
             .addIntegerOption((o) =>
               o
                 .setName("xp")
@@ -656,7 +656,7 @@ const config: Command = {
             .addIntegerOption((o) =>
               o
                 .setName("credits")
-                .setDescription("Crédits par invitation (1 crédit = 0,01 €)")
+                .setDescription("Pièces par invitation (1 pièce = 0,01 €)")
                 .setMinValue(0)
                 .setMaxValue(500),
             ),
@@ -697,7 +697,7 @@ const config: Command = {
         .addSubcommand((s) =>
           s
             .setName("palier")
-            .setDescription("Bonus en crédits à partir de N invitations")
+            .setDescription("Bonus en pièces à partir de N invitations")
             .addIntegerOption((o) =>
               o
                 .setName("nombre")
@@ -709,7 +709,7 @@ const config: Command = {
             .addIntegerOption((o) =>
               o
                 .setName("credits")
-                .setDescription("Crédits versés une fois (0 pour supprimer le palier)")
+                .setDescription("Pièces versées une fois (0 pour supprimer le palier)")
                 .setRequired(true)
                 .setMinValue(0)
                 .setMaxValue(5_000),
@@ -1430,10 +1430,10 @@ const config: Command = {
           [
             xp !== null ? `XP par invitation : **${xp}**.` : null,
             credits !== null
-              ? `Crédits par invitation : **${credits}** _(${(credits / 100).toFixed(2)} € de valeur boutique)_.`
+              ? `Pièces par invitation : **${credits}** _(${(credits / 100).toFixed(2)} € de valeur boutique)_.`
               : null,
             credits && !siteApiConfigured
-              ? "⚠️ `SITE_API_URL`/`SITE_API_TOKEN` absents du `.env` : aucun crédit ne sera versé."
+              ? "⚠️ `SITE_API_URL`/`SITE_API_TOKEN` absents du `.env` : aucune pièce ne sera versée."
               : null,
           ]
             .filter(Boolean)
@@ -1480,7 +1480,7 @@ const config: Command = {
           });
         await reply(
           interaction,
-          `Palier : **${credits}** crédits à **${threshold}** invitations validées.`,
+          `Palier : **${credits}** pièces à **${threshold}** invitations validées.`,
         );
         return;
       }
@@ -1495,7 +1495,7 @@ const config: Command = {
                 [
                   `**Salon d'annonce** ${cfg.inviteChannelId ? `<#${cfg.inviteChannelId}>` : "*non défini*"}`,
                   `**XP par invitation** ${cfg.inviteXp || "désactivée"}`,
-                  `**Crédits par invitation** ${cfg.inviteCredits || "désactivés"}${
+                  `**Pièces par invitation** ${cfg.inviteCredits || "désactivés"}${
                     cfg.inviteCredits && !siteApiConfigured
                       ? " ⚠️ site non configuré"
                       : ""
@@ -1510,13 +1510,13 @@ const config: Command = {
                   "**Paliers**",
                   tiers.length
                     ? tiers
-                        .map((t) => `· ${t.threshold} invitations → **${t.credits}** crédits`)
+                        .map((t) => `· ${t.threshold} invitations → **${t.credits}** pièces`)
                         .join("\n")
                     : "*aucun palier défini*",
                 ].join("\n"),
               )
               .setFooter({
-                text: "Référence : 100 crédits = 1,00 € · le jeu rapporte 1 crédit par heure active.",
+                text: "Référence : 100 pièces = 1,00 € · le jeu rapporte 1 pièce par heure active.",
               }),
           ],
           flags: MessageFlags.Ephemeral,

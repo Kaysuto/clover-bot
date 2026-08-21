@@ -80,7 +80,7 @@ const invites: Command = {
             `⏳ ${summary.pending} en attente _(maturation : ${cfg.inviteMaturityDays}j)_`,
             `✅ ${summary.rewarded} validée(s)`,
             `❌ ${summary.rejected} refusée(s)`,
-            summary.credits ? `🪙 ${summary.credits} crédits versés` : null,
+            summary.credits ? `🪙 ${summary.credits} pièces versées` : null,
           ]
             .filter(Boolean)
             .join("\n"),
