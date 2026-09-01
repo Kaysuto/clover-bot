@@ -61,6 +61,96 @@ export const TICKET_CATEGORIES: Record<string, TicketCategory> = {
   },
 };
 
+/** Données du message d'accueil d'un ticket : `TicketRow` les porte toutes. */
+export interface TicketWelcome {
+  ticketNumber: number;
+  category: string;
+  subject: string;
+  openerId: string;
+  claimedBy: string | null;
+  openedAt: Date;
+}
+
+/**
+ * Message d'accueil publié dans le salon du ticket.
+ *
+ * Le titre décrit le ticket (numéro et catégorie), jamais le sujet : celui-ci
+ * est saisi par le membre, il vit dans son propre champ où il tient en entier.
+ */
+export function buildTicketWelcome(ticket: TicketWelcome) {
+  const info = TICKET_CATEGORIES[ticket.category] ?? TICKET_CATEGORIES.support!;
+  const number = String(ticket.ticketNumber).padStart(4, "0");
+
+  const embed = brandEmbed()
+    .setTitle(`${info.emoji} Ticket #${number} — ${info.label}`)
+    .setDescription(
+      [
+        "> Un membre de l'équipe va te répondre dès que possible.",
+        "> Ajoute tout détail utile : captures d'écran, pseudo Minecraft, date et heure.",
+      ].join("\n"),
+    )
+    .addFields(
+      { name: "Sujet", value: ticket.subject.slice(0, 1024) },
+      { name: "Ouvert par", value: `<@${ticket.openerId}>`, inline: true },
+      {
+        name: "Ouvert",
+        value: `<t:${Math.floor(ticket.openedAt.getTime() / 1_000)}:R>`,
+        inline: true,
+      },
+      {
+        name: "Pris en charge par",
+        value: ticket.claimedBy ? `<@${ticket.claimedBy}>` : "—",
+        inline: true,
+      },
+    )
+    .setFooter({
+      text: "✋ Réclamer : pour l'équipe • 🔒 Fermer : archive et supprime le salon",
+    });
+
+  const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(buildId("ticket", "claim"))
+      .setLabel("Réclamer")
+      .setEmoji("✋")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(buildId("ticket", "close"))
+      .setLabel("Fermer")
+      .setEmoji("🔒")
+      .setStyle(ButtonStyle.Danger),
+  );
+
+  return { embeds: [embed], components: [buttons] };
+}
+
+/**
+ * Remet le message d'accueil au format courant (titre, sujet, prise en charge).
+ * Il n'est pas référencé en base : c'est le premier message du salon, et
+ * `after: "0"` renvoie justement les plus anciens.
+ */
+export async function refreshTicketWelcome(
+  channel: GuildTextBasedChannel,
+  botId: string,
+  ticket: TicketWelcome,
+): Promise<void> {
+  const oldest = await channel.messages
+    .fetch({ after: "0", limit: 3 })
+    .catch(() => null);
+  const message = oldest?.find(
+    (m) => m.author.id === botId && m.components.length > 0,
+  );
+  if (!message) return;
+
+  await message
+    .edit(buildTicketWelcome(ticket))
+    .catch((err: unknown) =>
+      logger.warn(
+        { err, channelId: channel.id },
+        "Actualisation du message d'accueil du ticket impossible",
+      ),
+    );
+}
+
 function ticketName(num: number): string {
   return `ticket-${String(num).padStart(4, "0")}`;
 }
@@ -379,54 +469,16 @@ async function createTicket(
     category,
   });
 
-  const info = TICKET_CATEGORIES[category] ?? TICKET_CATEGORIES.support!;
-  // Le sujet sert de titre : c'est ce qu'on lit en premier dans la liste des salons.
-  const titleLine = subject.split("\n")[0]?.slice(0, 200) || info.label;
-  const welcome = brandEmbed()
-    .setAuthor({
-      name: `Ticket #${String(num).padStart(4, "0")} · ${info.label}`,
-      iconURL: interaction.user.displayAvatarURL({ size: 128 }),
-    })
-    .setTitle(`${info.emoji} ${titleLine}`)
-    .setDescription(
-      [
-        "> Un membre de l'équipe va te répondre dès que possible.",
-        "> Ajoute tout détail utile : captures d'écran, pseudo Minecraft, date et heure.",
-      ].join("\n"),
-    )
-    .addFields(
-      { name: "Ouvert par", value: `<@${interaction.user.id}>`, inline: true },
-      { name: "Catégorie", value: `${info.emoji} ${info.label}`, inline: true },
-      {
-        name: "Ouvert",
-        value: `<t:${Math.floor(Date.now() / 1_000)}:R>`,
-        inline: true,
-      },
-    )
-    .setFooter({ text: "✋ Réclamer : pour l'équipe • 🔒 Fermer : archive et supprime le salon" });
-
-  // Le sujet complet mérite son champ dès qu'il dépasse une ligne de titre.
-  if (subject.length > 200 || subject.includes("\n")) {
-    welcome.spliceFields(0, 0, { name: "Sujet", value: subject.slice(0, 1024) });
-  }
-
-  const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(buildId("ticket", "claim"))
-      .setLabel("Réclamer")
-      .setEmoji("✋")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId(buildId("ticket", "close"))
-      .setLabel("Fermer")
-      .setEmoji("🔒")
-      .setStyle(ButtonStyle.Danger),
-  );
-
   await channel.send({
     content: `${interaction.user} · <@&${cfg.ticketSupportRoleId}>`,
-    embeds: [welcome],
-    components: [buttons],
+    ...buildTicketWelcome({
+      ticketNumber: num,
+      category,
+      subject,
+      openerId: interaction.user.id,
+      claimedBy: null,
+      openedAt: new Date(),
+    }),
   });
 
   await interaction.editReply({
@@ -457,6 +509,13 @@ async function claimTicket(interaction: ComponentInteraction): Promise<void> {
     .update(botTickets)
     .set({ status: "CLAIMED", claimedBy: interaction.user.id })
     .where(eq(botTickets.id, row.id));
+
+  if (interaction.channel?.isTextBased()) {
+    await refreshTicketWelcome(interaction.channel, interaction.client.user.id, {
+      ...row,
+      claimedBy: interaction.user.id,
+    });
+  }
 
   await interaction.reply({
     embeds: [
@@ -614,7 +673,10 @@ export async function refreshTicketPanels(client: CloverClient): Promise<void> {
   }
 }
 
-/** Au démarrage : les tickets dont le salon a disparu passent CLOSED. */
+/**
+ * Au démarrage : les tickets dont le salon a disparu passent CLOSED, les
+ * autres voient leur message d'accueil remis au format courant.
+ */
 export async function reconcileTickets(client: CloverClient): Promise<void> {
   const rows = await db
     .select()
@@ -626,7 +688,14 @@ export async function reconcileTickets(client: CloverClient): Promise<void> {
     const channel = guild
       ? await guild.channels.fetch(row.channelId).catch(() => null)
       : null;
-    if (channel) continue;
+    if (channel) {
+      // Le salon est toujours là : on en profite pour remettre le message
+      // d'accueil au format courant (il date de la version qui l'a publié).
+      if (channel.isTextBased()) {
+        await refreshTicketWelcome(channel, client.user!.id, row);
+      }
+      continue;
+    }
     await db
       .update(botTickets)
       .set({
