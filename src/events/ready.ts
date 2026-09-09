@@ -1,12 +1,15 @@
 import { syncGuildCommands } from "../lib/command-sync";
 import { touchHeartbeat } from "../lib/heartbeat";
 import { logger } from "../lib/logger";
+import { registerIngressRoute, startIngress } from "../lib/ingress";
 import { registerJob } from "../lib/scheduler";
 import { seedServers } from "../lib/servers";
 import {
   reconcileApplications,
   refreshApplicationPanels,
 } from "../modules/applications/manager";
+import { tickLockdown } from "../modules/antiraid/manager";
+import { createGameRoute } from "../modules/game/route";
 import { tickGiveaways } from "../modules/giveaways/manager";
 import { syncGuildInvites } from "../modules/invites/cache";
 import { tickInviteRewards } from "../modules/invites/rewards";
@@ -22,7 +25,7 @@ import { syncGuild } from "../modules/sync/manager";
 import { cleanupTempVoice } from "../modules/tempvoice/manager";
 import { reconcileTickets, refreshTicketPanels } from "../modules/tickets/manager";
 import { tickVoteRoles } from "../modules/vote/manager";
-import { startVoteServer } from "../modules/vote/server";
+import { createVoteRoute } from "../modules/vote/route";
 import type { EventHandler } from "../types";
 
 const ready: EventHandler<"clientReady"> = {
@@ -141,6 +144,12 @@ const ready: EventHandler<"clientReady"> = {
       runOnStart: true,
     });
     registerJob({
+      name: "raid-lockdown",
+      intervalMs: 60_000, // l'échéance vit en base : un redémarrage rouvre quand même
+      run: () => tickLockdown(client),
+      runOnStart: true,
+    });
+    registerJob({
       name: "heartbeat",
       intervalMs: 30_000,
       run: async () => {
@@ -157,9 +166,11 @@ const ready: EventHandler<"clientReady"> = {
       },
     });
 
-    // Réception des votes : n'ouvre un port que si VOTE_HTTP_PORT et VOTE_TOKEN
-    // sont renseignés (cf. modules/vote/server.ts).
-    startVoteServer(client);
+    // Serveur d'entrée : n'ouvre un port que si VOTE_HTTP_PORT est renseigné,
+    // et chaque route reste fermée tant que SON jeton manque (cf. lib/ingress.ts).
+    registerIngressRoute(createVoteRoute(client));
+    registerIngressRoute(createGameRoute(client));
+    startIngress();
 
     logger.info("🍀 Clover Bot prêt !");
   },

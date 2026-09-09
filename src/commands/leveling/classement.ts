@@ -12,8 +12,11 @@ const classement: Command = {
     ),
   async execute(interaction) {
     const page = interaction.options.getInteger("page") ?? 1;
+    // La page se construit à partir de la base : différer, sinon une requête
+    // lente dépasse les 3 s d'accusé de réception de Discord.
+    await interaction.deferReply();
     const { embed, row } = await buildLeaderboardPage(interaction.guild, page);
-    await interaction.reply({ embeds: [embed], components: [row] });
+    await interaction.editReply({ embeds: [embed], components: [row] });
   },
 };
 

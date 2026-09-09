@@ -1,4 +1,5 @@
 import type { EventHandler } from "../types";
+import autoModerationActionExecution from "./autoModerationActionExecution";
 import channelCreate from "./channelCreate";
 import channelDelete from "./channelDelete";
 import channelUpdate from "./channelUpdate";
@@ -37,4 +38,5 @@ export const events: EventHandler[] = [
   roleUpdate,
   inviteCreate,
   inviteDelete,
+  autoModerationActionExecution,
 ];

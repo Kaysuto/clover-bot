@@ -50,9 +50,12 @@ const envSchema = z.object({
   LUCKPERMS_DB_NAME: optionalString,
   LUCKPERMS_TABLE_PREFIX: optionalString,
 
-  // Réception des votes (listes de serveurs Minecraft)
+  // Serveur d'entrée HTTP (cf. lib/ingress.ts) : un port, un jeton par route.
   VOTE_HTTP_PORT: optionalPort,
+  /** Jeton des listes de serveurs Minecraft (route `/vote`). */
   VOTE_TOKEN: optionalString,
+  /** Jeton du plugin clover-core (route `/game`) — jamais le même que le précédent. */
+  GAME_TOKEN: optionalString,
 
   // Endpoints internes du site (pièces, boutique) — cf. lib/site-api.ts
   SITE_API_URL: optionalString,
@@ -88,8 +91,11 @@ export const luckPermsConfigured = Boolean(
   env.LUCKPERMS_DB_HOST && env.LUCKPERMS_DB_USER && env.LUCKPERMS_DB_NAME,
 );
 
-/** Réception des votes : le jeton partagé est obligatoire, sinon l'endpoint reste fermé. */
+/** Réception des votes : le jeton partagé est obligatoire, sinon la route reste fermée. */
 export const voteEndpointConfigured = Boolean(env.VOTE_HTTP_PORT && env.VOTE_TOKEN);
+
+/** Événements du plugin : même règle, avec son propre jeton (cf. lib/ingress.ts). */
+export const gameEndpointConfigured = Boolean(env.VOTE_HTTP_PORT && env.GAME_TOKEN);
 
 /** Pièces et boutique : sans ces deux variables, le bot ne parle pas d'argent. */
 export const siteApiConfigured = Boolean(env.SITE_API_URL && env.SITE_API_TOKEN);

@@ -88,20 +88,22 @@ const voc: Command = {
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
     const voice = interaction.member.voice.channel as VoiceChannel | null;
+    // Lecture en base puis édition du salon : différer d'emblée, sinon la
+    // réponse arrive après les 3 s d'accusé de réception de Discord. Toutes les
+    // réponses de /voc sont éphémères, le différé l'est donc aussi.
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const row = voice ? await getTempVoiceRow(voice.id) : null;
 
     if (!voice || !row) {
-      await interaction.reply({
+      await interaction.editReply({
         embeds: [errorEmbed("Tu dois être dans un vocal temporaire pour utiliser cette commande.")],
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
     const respond = async (result: ActionResult) => {
-      await interaction.reply({
+      await interaction.editReply({
         embeds: [result.ok ? successEmbed(result.message) : errorEmbed(result.message)],
-        flags: MessageFlags.Ephemeral,
       });
       // Le panneau du salon texte doit refléter l'état, même modifié en slash.
       if (result.ok && PANEL_SUBCOMMANDS.has(sub)) {

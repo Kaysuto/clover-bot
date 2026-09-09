@@ -71,6 +71,20 @@
       "when": 1786696890040,
       "tag": "0009_magical_marten_broadcloak",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788791930329,
+      "tag": "0010_graceful_morlocks",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788793572580,
+      "tag": "0011_majestic_gauntlet",
+      "breakpoints": true
     }
   ]
 }

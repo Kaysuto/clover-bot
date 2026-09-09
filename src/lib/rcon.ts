@@ -114,23 +114,31 @@ export async function rconCommand(
 /**
  * Diffuse une commande à tous les serveurs dont le RCON est configuré : un
  * bannissement doit valoir partout, pas seulement sur le lobby. Retourne les
- * clés des serveurs qui ont accepté la commande.
+ * clés des serveurs qui ont accepté la commande, dans l'ordre du registre.
+ *
+ * Les connexions partent en parallèle : en série, six serveurs dont un seul est
+ * injoignable font attendre six fois le `timeout` de 5 s — assez pour dépasser
+ * le délai d'un appelant HTTP (endpoint de vote) ou d'une interaction Discord.
  */
 export async function rconBroadcast(command: string): Promise<string[]> {
   const servers = await getServers();
-  const done: string[] = [];
-  for (const server of servers) {
-    const target = targetOf(server);
-    if (!target) continue;
-    try {
-      await withRcon(target, (rcon) => rcon.send(command));
-      done.push(server.key);
-    } catch (err) {
-      logger.warn(
-        { err, command, server: server.key },
-        "Commande RCON refusée par un serveur",
-      );
-    }
-  }
-  return done;
+  const targets = servers
+    .map((server) => targetOf(server))
+    .filter((target): target is RconTarget => target !== null);
+
+  const results = await Promise.all(
+    targets.map(async (target) => {
+      try {
+        await withRcon(target, (rcon) => rcon.send(command));
+        return target.key;
+      } catch (err) {
+        logger.warn(
+          { err, command, server: target.key },
+          "Commande RCON refusée par un serveur",
+        );
+        return null;
+      }
+    }),
+  );
+  return results.filter((key): key is string => key !== null);
 }

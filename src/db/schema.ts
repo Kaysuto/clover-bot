@@ -148,6 +148,43 @@ export const botGuildConfig = pgTable("bot_guild_config", {
   applicationCounter: integer("application_counter").notNull().default(0),
   applicationsOpen: boolean("applications_open").notNull().default(false),
 
+  // Événements reçus du serveur Minecraft (plugin → ingress HTTP, cf. modules/game)
+  /** Salon des annonces de démarrage/arrêt/incident des serveurs du réseau. */
+  gameEventChannelId: text("game_event_channel_id"),
+  /**
+   * Répercuter sur Discord une sanction posée en jeu (sens retour de
+   * `sanctionPropagateMc`). Désactivé par défaut : bannir un membre Discord sur
+   * la foi d'un appel HTTP demande un choix explicite.
+   */
+  gameSanctionInbound: boolean("game_sanction_inbound").notNull().default(false),
+
+  // Anti-raid (arrivées) — AutoMod couvre le contenu, ceci couvre l'entrée
+  /** Arrivées simultanées déclenchant le verrouillage (0 = détection désactivée). */
+  raidJoinThreshold: integer("raid_join_threshold").notNull().default(0),
+  /** Fenêtre d'observation des arrivées, en secondes. */
+  raidWindowSec: integer("raid_window_sec").notNull().default(30),
+  /** Durée du verrouillage avant levée automatique, en minutes. */
+  raidLockdownMinutes: integer("raid_lockdown_minutes").notNull().default(15),
+  /**
+   * Fin du verrouillage en cours (null = aucun). En base et non en mémoire : un
+   * redémarrage ne doit pas laisser les invitations coupées sans personne pour
+   * les rétablir (cf. job `raid-lockdown`).
+   */
+  raidUntil: timestamp("raid_until", { withTimezone: true }),
+  /** Niveau de vérification à rétablir à la levée du verrouillage. */
+  raidPreviousVerification: integer("raid_previous_verification"),
+  /** Couper les invitations pendant le verrouillage (le vrai robinet à bots). */
+  raidPauseInvites: boolean("raid_pause_invites").notNull().default(true),
+  /** Salon d'alerte du staff ; à défaut, le salon de logs « modération ». */
+  raidAlertChannelId: text("raid_alert_channel_id"),
+  /** Âge minimal du compte Discord à l'arrivée, en jours (0 = pas de contrôle). */
+  raidMinAccountAgeDays: integer("raid_min_account_age_days").notNull().default(0),
+  /**
+   * Rôle de quarantaine appliqué au compte trop jeune. À défaut, le membre est
+   * expulsé — jamais banni : un faux positif doit rester réversible.
+   */
+  raidQuarantineRoleId: text("raid_quarantine_role_id"),
+
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -194,11 +231,28 @@ export const botLogSettings = pgTable(
   "bot_log_settings",
   {
     guildId: text("guild_id").notNull(),
-    category: text("category").notNull(), // membres | moderation | vocal | serveur
+    category: text("category").notNull(), // membres | moderation | vocal | serveur | automod
     channelId: text("channel_id"), // null = salon de logs par défaut
     enabled: boolean("enabled").notNull().default(true),
   },
   (t) => [primaryKey({ columns: [t.guildId, t.category] })],
+);
+
+// ─── AutoMod ─────────────────────────────────────────────────────────────────
+
+/**
+ * Règle AutoMod native créée par le bot. Le contenu de la règle (mots, seuils,
+ * exemptions) vit chez Discord : cette table ne retient que l'identifiant, pour
+ * retrouver la règle même renommée depuis les Paramètres du serveur.
+ */
+export const botAutomodRules = pgTable(
+  "bot_automod_rules",
+  {
+    guildId: text("guild_id").notNull(),
+    kind: text("kind").notNull(), // spam | grossierete | mentions | mots | invitations
+    ruleId: text("rule_id").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.guildId, t.kind] })],
 );
 
 // ─── Giveaways ───────────────────────────────────────────────────────────────

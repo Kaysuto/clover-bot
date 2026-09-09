@@ -1,5 +1,5 @@
 import type { EmbedBuilder, Guild, GuildMember, User } from "discord.js";
-import { and, desc, eq, isNotNull, lte } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, lte } from "drizzle-orm";
 import type { CloverClient } from "../../client";
 import { db } from "../../db";
 import { getGuildConfig, type GuildConfig } from "../../db/guild-config";
@@ -42,6 +42,11 @@ export interface ApplySanctionInput {
   durationMs?: number | null;
   /** Prévenir le membre en message privé avant l'action. */
   notify?: boolean;
+  /**
+   * Répercuter la sanction en jeu. `false` pour une sanction qui **vient** du
+   * jeu (`modules/game`) : la renvoyer par RCON la ferait tourner en boucle.
+   */
+  propagate?: boolean;
 }
 
 export interface ApplySanctionResult {
@@ -118,10 +123,10 @@ export async function applySanction(
       break;
   }
 
-  const propagatedTo = await propagate(cfg, type, linked?.minecraftUsername, {
-    reason,
-    durationMs,
-  });
+  const propagatedTo =
+    input.propagate === false
+      ? []
+      : await propagate(cfg, type, linked?.minecraftUsername, { reason, durationMs });
 
   await sendLog(guild, "moderation", sanctionEmbed(sanction, target, moderator)).catch(
     () => undefined,
@@ -173,12 +178,16 @@ async function applyMute(
     .catch(() => failures.push("Ajout du rôle muet refusé (permissions ?)."));
 }
 
-/** Lève une sanction encore active (mute ou bannissement). */
+/**
+ * Lève une sanction encore active (mute ou bannissement). `propagate: false`
+ * pour une levée qui vient déjà du jeu, sinon la commande repart en RCON.
+ */
 export async function revokeSanction(
   guild: Guild,
   sanction: SanctionRow,
   moderatorId: string,
   reason: string,
+  options: { propagate?: boolean } = {},
 ): Promise<string[]> {
   const cfg = await getGuildConfig(guild.id);
   const failures: string[] = [];
@@ -210,12 +219,14 @@ export async function revokeSanction(
     }
   }
 
-  await propagate(
-    cfg,
-    sanction.type === "BAN" ? "UNBAN" : "UNMUTE",
-    sanction.minecraftUsername,
-    { reason, durationMs: null },
-  );
+  if (options.propagate !== false) {
+    await propagate(
+      cfg,
+      sanction.type === "BAN" ? "UNBAN" : "UNMUTE",
+      sanction.minecraftUsername,
+      { reason, durationMs: null },
+    );
+  }
 
   return failures;
 }
@@ -339,6 +350,54 @@ export function getSanctions(
     .from(botSanctions)
     .where(and(eq(botSanctions.guildId, guildId), eq(botSanctions.userId, userId)))
     .orderBy(desc(botSanctions.createdAt));
+}
+
+/** Sanction en cours de ce type (mute ou bannissement), la plus récente. */
+export function getActiveSanction(
+  guildId: string,
+  userId: string,
+  type: SanctionType,
+): Promise<SanctionRow | undefined> {
+  return db
+    .select()
+    .from(botSanctions)
+    .where(
+      and(
+        eq(botSanctions.guildId, guildId),
+        eq(botSanctions.userId, userId),
+        eq(botSanctions.type, type),
+        eq(botSanctions.active, true),
+      ),
+    )
+    .orderBy(desc(botSanctions.createdAt))
+    .limit(1)
+    .then((rows) => rows[0]);
+}
+
+/**
+ * Une sanction identique vient-elle d'être enregistrée ? Garde-fou anti-boucle
+ * pour les sanctions reçues du jeu : notre propre propagation RCON revient sous
+ * forme d'événement quelques secondes plus tard.
+ */
+export function hasRecentSanction(
+  guildId: string,
+  userId: string,
+  type: SanctionType,
+  withinMs: number,
+): Promise<boolean> {
+  return db
+    .select({ id: botSanctions.id })
+    .from(botSanctions)
+    .where(
+      and(
+        eq(botSanctions.guildId, guildId),
+        eq(botSanctions.userId, userId),
+        eq(botSanctions.type, type),
+        gte(botSanctions.createdAt, new Date(Date.now() - withinMs)),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows.length > 0);
 }
 
 export function getSanction(id: number): Promise<SanctionRow | undefined> {

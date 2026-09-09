@@ -27,6 +27,9 @@ const invites: Command = {
     ),
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
+    // Les deux sous-commandes lisent la base avant de répondre : différer, sinon
+    // une requête lente dépasse les 3 s d'accusé de réception de Discord.
+    await interaction.deferReply();
 
     if (sub === "voir") {
       const target =
@@ -87,7 +90,7 @@ const invites: Command = {
         });
       }
 
-      await interaction.reply({ embeds: [embed] });
+      await interaction.editReply({ embeds: [embed] });
       return;
     }
 
@@ -110,7 +113,7 @@ const invites: Command = {
           `${medals[i] ?? `**#${i + 1}**`} <@${r.userId}> — **${r.total}** invitation(s)`,
       );
 
-    await interaction.reply({
+    await interaction.editReply({
       embeds: [
         brandEmbed()
           .setTitle("🔗 Classement des invitations")

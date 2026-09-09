@@ -1,5 +1,5 @@
 import type { Guild, GuildMember } from "discord.js";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { getGuildConfig, type GuildConfig } from "../../db/guild-config";
 import { botMinecraftLinks } from "../../db/schema";
@@ -47,6 +47,52 @@ export async function getLinkedAccount(
     };
   }
   return null;
+}
+
+/**
+ * Sens inverse : compte Minecraft → Discord. Les deux tables de liaison sont
+ * interrogées comme dans `getLinkedAccount`, le site d'abord. L'UUID prime sur
+ * le pseudo, qui peut changer entre deux connexions.
+ *
+ * Utilisé par tout ce qui arrive du jeu et ne connaît que le joueur : votes
+ * (listes de serveurs) et événements du plugin (`modules/game`).
+ */
+export async function getDiscordIdByPlayer(player: {
+  username?: string | null;
+  uuid?: string | null;
+}): Promise<string | null> {
+  if (player.uuid) {
+    const [site] = await db
+      .select({ discordId: usersMeta.discordId })
+      .from(usersMeta)
+      .where(eq(usersMeta.minecraftUuid, player.uuid))
+      .limit(1);
+    if (site?.discordId) return site.discordId;
+
+    const [code] = await db
+      .select({ discordId: botMinecraftLinks.discordId })
+      .from(botMinecraftLinks)
+      .where(eq(botMinecraftLinks.minecraftUuid, player.uuid))
+      .limit(1);
+    if (code?.discordId) return code.discordId;
+  }
+
+  if (!player.username) return null;
+  const needle = player.username.toLowerCase();
+
+  const [site] = await db
+    .select({ discordId: usersMeta.discordId })
+    .from(usersMeta)
+    .where(sql`lower(${usersMeta.minecraftUsername}) = ${needle}`)
+    .limit(1);
+  if (site?.discordId) return site.discordId;
+
+  const [code] = await db
+    .select({ discordId: botMinecraftLinks.discordId })
+    .from(botMinecraftLinks)
+    .where(sql`lower(${botMinecraftLinks.minecraftUsername}) = ${needle}`)
+    .limit(1);
+  return code?.discordId ?? null;
 }
 
 export type SyncStatus = "synced" | "not-linked" | "partial";

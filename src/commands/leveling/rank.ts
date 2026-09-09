@@ -1,8 +1,4 @@
-import {
-  InteractionContextType,
-  MessageFlags,
-  SlashCommandBuilder,
-} from "discord.js";
+import { InteractionContextType, SlashCommandBuilder } from "discord.js";
 import { and, count, eq, gt } from "drizzle-orm";
 import { db } from "../../db";
 import { botLevels } from "../../db/schema";
@@ -25,6 +21,9 @@ const rank: Command = {
     ),
   async execute(interaction) {
     const target = interaction.options.getMember("membre") ?? interaction.member;
+    // Deux allers-retours Neon avant la réponse : au-delà des 3 s d'accusé de
+    // réception, Discord invalide l'interaction (« Unknown interaction »).
+    await interaction.deferReply();
 
     const [row] = await db
       .select()
@@ -38,12 +37,11 @@ const rank: Command = {
       .limit(1);
 
     if (!row) {
-      await interaction.reply({
+      await interaction.editReply({
         content:
           target.id === interaction.user.id
             ? "Tu n'as pas encore gagné d'XP. Participe aux discussions ! 💬"
             : `${target.displayName} n'a pas encore gagné d'XP.`,
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -84,7 +82,7 @@ const rank: Command = {
         },
       );
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   },
 };
 

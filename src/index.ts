@@ -5,8 +5,8 @@ import { env } from "./config";
 import { pool } from "./db";
 import { events } from "./events";
 import { logger } from "./lib/logger";
+import { stopIngress } from "./lib/ingress";
 import { stopAllJobs } from "./lib/scheduler";
-import { stopVoteServer } from "./modules/vote/server";
 
 const client = new CloverClient();
 
@@ -55,7 +55,7 @@ async function shutdown(signal: string): Promise<void> {
   }, SHUTDOWN_TIMEOUT_MS);
   timeout.unref();
 
-  await stopVoteServer().catch(() => undefined);
+  await stopIngress().catch(() => undefined);
   await client.destroy().catch(() => undefined);
   await pool.end().catch(() => undefined);
   clearTimeout(timeout);

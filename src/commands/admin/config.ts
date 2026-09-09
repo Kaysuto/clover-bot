@@ -1,6 +1,7 @@
 import {
   ChannelType,
   type ChatInputCommandInteraction,
+  DiscordAPIError,
   InteractionContextType,
   MessageFlags,
   PermissionFlagsBits,
@@ -11,6 +12,7 @@ import { and, eq } from "drizzle-orm";
 import type { CloverClient } from "../../client";
 import {
   env,
+  gameEndpointConfigured,
   luckPermsConfigured,
   siteApiConfigured,
   voteEndpointConfigured,
@@ -20,10 +22,21 @@ import { getGuildConfig, updateGuildConfig } from "../../db/guild-config";
 import { botInviteTiers, botLevelRoles, botRankRoles } from "../../db/schema";
 import { brandEmbed, errorEmbed, successEmbed } from "../../lib/embeds";
 import { getMcStatus } from "../../lib/mc-status";
+import { liftLockdown } from "../../modules/antiraid/manager";
 import {
   buildApplicationPanel,
   refreshApplicationPanels,
 } from "../../modules/applications/manager";
+import {
+  AUTOMOD_KINDS,
+  getAutomodState,
+  setExemption,
+  setInviteRule,
+  setKeywordRule,
+  setMentionRule,
+  setProfanityRule,
+  setSpamRule,
+} from "../../modules/automod/manager";
 import { getInviteTiers } from "../../modules/invites/rewards";
 import { getRankRoles } from "../../modules/ranks/sync";
 import {
@@ -60,6 +73,33 @@ async function reply(
     embeds: [successEmbed(message)],
     flags: MessageFlags.Ephemeral,
   });
+}
+
+/**
+ * Les règles AutoMod appartiennent à Discord : sans « Gérer le serveur », l'API
+ * répond 50013 et le message d'erreur générique ne dit pas quoi corriger.
+ */
+async function runAutomod(
+  interaction: ChatInputCommandInteraction<"cached">,
+  action: () => Promise<string>,
+): Promise<void> {
+  try {
+    const message = await action();
+    await reply(interaction, message);
+  } catch (err) {
+    if (err instanceof DiscordAPIError && err.code === 50013) {
+      await interaction.reply({
+        embeds: [
+          errorEmbed(
+            "Permission « Gérer le serveur » manquante : le bot ne peut pas modifier les règles AutoMod.",
+          ),
+        ],
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    throw err;
+  }
 }
 
 /** Salon vocal verrouillé servant d'affichage (personne ne peut s'y connecter). */
@@ -484,6 +524,79 @@ const config: Command = {
           s.setName("voir").setDescription("Afficher la configuration de modération"),
         ),
     )
+    // ── AutoMod ──
+    .addSubcommandGroup((g) =>
+      g
+        .setName("automod")
+        .setDescription("Règles de modération automatique de Discord")
+        .addSubcommand((s) =>
+          s
+            .setName("spam")
+            .setDescription("Bloquer le spam et le contenu publicitaire")
+            .addBooleanOption((o) =>
+              o.setName("actif").setDescription("Activer la règle").setRequired(true),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("grossieretes")
+            .setDescription("Bloquer les grossièretés des listes maintenues par Discord")
+            .addBooleanOption((o) =>
+              o.setName("actif").setDescription("Activer la règle").setRequired(true),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("mentions")
+            .setDescription("Plafonner les mentions par message")
+            .addIntegerOption((o) =>
+              o
+                .setName("limite")
+                .setDescription("Mentions maximum (0 pour retirer la règle)")
+                .setRequired(true)
+                .setMinValue(0)
+                .setMaxValue(50),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("mots")
+            .setDescription("Liste de mots interdits, séparés par des virgules")
+            .addStringOption((o) =>
+              o
+                .setName("liste")
+                .setDescription("Ex. mot1, mot2 (vide pour retirer la règle)")
+                .setRequired(true)
+                .setMaxLength(1000),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("invitations")
+            .setDescription("Bloquer les liens d'invitation vers d'autres serveurs")
+            .addBooleanOption((o) =>
+              o.setName("actif").setDescription("Activer la règle").setRequired(true),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("exemption")
+            .setDescription("Exempter un rôle ou un salon de toutes les règles")
+            .addRoleOption((o) => o.setName("role").setDescription("Rôle exempté"))
+            .addChannelOption((o) =>
+              o
+                .setName("salon")
+                .setDescription("Salon exempté")
+                .addChannelTypes(ChannelType.GuildText, ChannelType.GuildVoice),
+            )
+            .addBooleanOption((o) =>
+              o.setName("retirer").setDescription("Retirer l'exemption au lieu de l'ajouter"),
+            ),
+        )
+        .addSubcommand((s) =>
+          s.setName("voir").setDescription("Afficher l'état des règles AutoMod"),
+        ),
+    )
     // ── Grades Minecraft ──
     .addSubcommandGroup((g) =>
       g
@@ -775,6 +888,113 @@ const config: Command = {
             .addBooleanOption((o) =>
               o.setName("actif").setDescription("Candidatures ouvertes").setRequired(true),
             ),
+        ),
+    )
+    // ── Événements du jeu ──
+    .addSubcommandGroup((g) =>
+      g
+        .setName("jeu")
+        .setDescription("Événements poussés par le serveur Minecraft")
+        .addSubcommand((s) =>
+          s
+            .setName("salon")
+            .setDescription("Salon des annonces de démarrage/arrêt")
+            .addChannelOption((o) =>
+              o
+                .setName("salon")
+                .setDescription("Salon — vide = logs « serveur »")
+                .addChannelTypes(ChannelType.GuildText),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("sanctions")
+            .setDescription("Sanctions posées en jeu → Discord")
+            .addBooleanOption((o) =>
+              o.setName("actif").setDescription("Répercussion active").setRequired(true),
+            ),
+        )
+        .addSubcommand((s) =>
+          s.setName("voir").setDescription("Afficher la configuration"),
+        ),
+    )
+    // ── Anti-raid ──
+    .addSubcommandGroup((g) =>
+      g
+        .setName("antiraid")
+        .setDescription("Protection de l'entrée du serveur")
+        .addSubcommand((s) =>
+          s
+            .setName("seuil")
+            .setDescription("Rafale d'arrivées à verrouiller")
+            .addIntegerOption((o) =>
+              o
+                .setName("arrivees")
+                .setDescription("Arrivées (0 = désactivé)")
+                .setMinValue(0)
+                .setMaxValue(100)
+                .setRequired(true),
+            )
+            .addIntegerOption((o) =>
+              o
+                .setName("fenetre")
+                .setDescription("Fenêtre en secondes (défaut : 30)")
+                .setMinValue(5)
+                .setMaxValue(600),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("duree")
+            .setDescription("Durée du verrouillage")
+            .addIntegerOption((o) =>
+              o
+                .setName("minutes")
+                .setDescription("Durée en minutes")
+                .setMinValue(1)
+                .setMaxValue(1440)
+                .setRequired(true),
+            )
+            .addBooleanOption((o) =>
+              o
+                .setName("couper-invitations")
+                .setDescription("Couper les invitations"),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("age-minimum")
+            .setDescription("Âge minimal du compte à l'arrivée")
+            .addIntegerOption((o) =>
+              o
+                .setName("jours")
+                .setDescription("Âge en jours (0 = pas de contrôle)")
+                .setMinValue(0)
+                .setMaxValue(365)
+                .setRequired(true),
+            )
+            .addRoleOption((o) =>
+              o
+                .setName("quarantaine")
+                .setDescription("Rôle du compte trop jeune — vide = expulsion"),
+            ),
+        )
+        .addSubcommand((s) =>
+          s
+            .setName("alerte")
+            .setDescription("Salon d'alerte du staff")
+            .addChannelOption((o) =>
+              o
+                .setName("salon")
+                .setDescription("Salon — vide = logs « modération »")
+                .addChannelTypes(ChannelType.GuildText),
+            ),
+        )
+        .addSubcommand((s) =>
+          s.setName("deverrouiller").setDescription("Lever le verrouillage en cours"),
+        )
+        .addSubcommand((s) =>
+          s.setName("voir").setDescription("Afficher la configuration"),
         ),
     ),
   async execute(interaction) {
@@ -1255,6 +1475,127 @@ const config: Command = {
         return;
       }
 
+      // ── AutoMod ──
+      case "automod/spam": {
+        const actif = interaction.options.getBoolean("actif", true);
+        await runAutomod(interaction, async () => {
+          await setSpamRule(interaction.guild, actif);
+          return actif ? "Règle **spam** activée." : "Règle **spam** retirée.";
+        });
+        return;
+      }
+      case "automod/grossieretes": {
+        const actif = interaction.options.getBoolean("actif", true);
+        await runAutomod(interaction, async () => {
+          await setProfanityRule(interaction.guild, actif);
+          return actif ? "Règle **grossièretés** activée." : "Règle **grossièretés** retirée.";
+        });
+        return;
+      }
+      case "automod/mentions": {
+        const limite = interaction.options.getInteger("limite", true);
+        await runAutomod(interaction, async () => {
+          await setMentionRule(interaction.guild, limite);
+          return limite > 0
+            ? `Messages bloqués au-delà de **${limite} mentions**.`
+            : "Règle **mentions massives** retirée.";
+        });
+        return;
+      }
+      case "automod/mots": {
+        // Discord plafonne chaque terme à 60 caractères : on tronque plutôt que
+        // de rejeter la liste entière pour un seul mot trop long.
+        const mots = [
+          ...new Set(
+            interaction.options
+              .getString("liste", true)
+              .split(",")
+              .map((mot) => mot.trim().slice(0, 60))
+              .filter((mot) => mot.length > 0),
+          ),
+        ];
+        await runAutomod(interaction, async () => {
+          await setKeywordRule(interaction.guild, mots);
+          return mots.length > 0
+            ? `**${mots.length}** mot(s) interdit(s) enregistré(s).`
+            : "Règle **mots interdits** retirée.";
+        });
+        return;
+      }
+      case "automod/invitations": {
+        const actif = interaction.options.getBoolean("actif", true);
+        await runAutomod(interaction, async () => {
+          await setInviteRule(interaction.guild, actif);
+          return actif
+            ? "Les liens d'invitation Discord sont bloqués."
+            : "Règle **invitations** retirée.";
+        });
+        return;
+      }
+      case "automod/exemption": {
+        const role = interaction.options.getRole("role");
+        const salon = interaction.options.getChannel("salon");
+        const retirer = interaction.options.getBoolean("retirer") ?? false;
+        if (!role && !salon) {
+          await interaction.reply({
+            embeds: [errorEmbed("Indique au moins un rôle ou un salon.")],
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
+        await runAutomod(interaction, async () => {
+          const touched = await setExemption(
+            interaction.guild,
+            { roleId: role?.id, channelId: salon?.id },
+            retirer,
+          );
+          if (touched === 0) return "Aucune règle AutoMod active : rien à exempter.";
+          const cible = [role ? `<@&${role.id}>` : null, salon ? `<#${salon.id}>` : null]
+            .filter(Boolean)
+            .join(" et ");
+          return retirer
+            ? `Exemption retirée pour ${cible} sur **${touched}** règle(s).`
+            : `${cible} exempté(s) sur **${touched}** règle(s).`;
+        });
+        return;
+      }
+      case "automod/voir": {
+        const states = await getAutomodState(interaction.guild);
+        const lines = states.map((state) =>
+          state.enabled
+            ? `✅ **${AUTOMOD_KINDS[state.kind]}** — ${state.detail}`
+            : `❌ **${AUTOMOD_KINDS[state.kind]}**`,
+        );
+        const exemptRoles = [...new Set(states.flatMap((state) => state.exemptRoleIds))];
+        const exemptChannels = [...new Set(states.flatMap((state) => state.exemptChannelIds))];
+        await interaction.reply({
+          embeds: [
+            brandEmbed()
+              .setTitle("🛡️ Modération automatique")
+              .setDescription(lines.join("\n"))
+              .addFields(
+                {
+                  name: "Rôles exemptés",
+                  value: exemptRoles.length
+                    ? exemptRoles.map((id) => `<@&${id}>`).join(" ")
+                    : "*aucun*",
+                },
+                {
+                  name: "Salons exemptés",
+                  value: exemptChannels.length
+                    ? exemptChannels.map((id) => `<#${id}>`).join(" ")
+                    : "*aucun*",
+                },
+              )
+              .setFooter({
+                text: "Filtrage assuré par Discord. Les déclenchements sont publiés dans la catégorie de logs « AutoMod ».",
+              }),
+          ],
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
       // ── Grades Minecraft ──
       case "grades/actif": {
         const actif = interaction.options.getBoolean("actif", true);
@@ -1585,6 +1926,137 @@ const config: Command = {
           interaction,
           actif ? "Candidatures **ouvertes**." : "Candidatures **fermées**.",
         );
+        return;
+      }
+
+      // ── Événements du jeu ──
+      case "jeu/salon": {
+        const salon = interaction.options.getChannel("salon");
+        await updateGuildConfig(guildId, { gameEventChannelId: salon?.id ?? null });
+        await reply(
+          interaction,
+          salon
+            ? `Les événements des serveurs seront annoncés dans <#${salon.id}>.`
+            : "Les événements des serveurs repartiront dans les logs « serveur ».",
+        );
+        return;
+      }
+      case "jeu/sanctions": {
+        const actif = interaction.options.getBoolean("actif", true);
+        await updateGuildConfig(guildId, { gameSanctionInbound: actif });
+        await reply(
+          interaction,
+          actif
+            ? "Une sanction posée en jeu sera **répercutée sur Discord** (compte lié uniquement)."
+            : "Les sanctions posées en jeu **resteront en jeu**.",
+        );
+        return;
+      }
+      case "jeu/voir": {
+        const cfg = await getGuildConfig(guildId);
+        await interaction.reply({
+          embeds: [
+            brandEmbed()
+              .setTitle("🎮 Événements du jeu")
+              .setDescription(
+                [
+                  `**Endpoint** ${gameEndpointConfigured ? `✅ port \`${env.VOTE_HTTP_PORT}\`, chemin \`/game\`` : "❌ `VOTE_HTTP_PORT` et `GAME_TOKEN` absents du `.env`"}`,
+                  `**Salon d'annonce** ${cfg.gameEventChannelId ? `<#${cfg.gameEventChannelId}>` : "*logs « serveur »*"}`,
+                  `**Sanctions du jeu → Discord** ${cfg.gameSanctionInbound ? "✅ activé" : "❌ désactivé"}`,
+                ].join("\n"),
+              )
+              .setFooter({
+                text: "Le plugin pousse ses événements sur /game avec GAME_TOKEN",
+              }),
+          ],
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      // ── Anti-raid ──
+      case "antiraid/seuil": {
+        const arrivees = interaction.options.getInteger("arrivees", true);
+        const fenetre = interaction.options.getInteger("fenetre") ?? 30;
+        await updateGuildConfig(guildId, {
+          raidJoinThreshold: arrivees,
+          raidWindowSec: fenetre,
+        });
+        await reply(
+          interaction,
+          arrivees
+            ? `Verrouillage au-delà de **${arrivees}** arrivées en **${fenetre} s**.`
+            : "Détection de rafale **désactivée**.",
+        );
+        return;
+      }
+      case "antiraid/duree": {
+        const minutes = interaction.options.getInteger("minutes", true);
+        const couper = interaction.options.getBoolean("couper-invitations") ?? true;
+        await updateGuildConfig(guildId, {
+          raidLockdownMinutes: minutes,
+          raidPauseInvites: couper,
+        });
+        await reply(
+          interaction,
+          `Verrouillage de **${minutes} min**, invitations ${couper ? "**coupées**" : "**laissées ouvertes**"}.`,
+        );
+        return;
+      }
+      case "antiraid/age-minimum": {
+        const jours = interaction.options.getInteger("jours", true);
+        const role = interaction.options.getRole("quarantaine");
+        await updateGuildConfig(guildId, {
+          raidMinAccountAgeDays: jours,
+          raidQuarantineRoleId: role?.id ?? null,
+        });
+        await reply(
+          interaction,
+          jours
+            ? `Compte de moins de **${jours} j** à l'arrivée : ${role ? `rôle ${role}` : "**expulsion**"}.`
+            : "Contrôle de l'âge des comptes **désactivé**.",
+        );
+        return;
+      }
+      case "antiraid/alerte": {
+        const salon = interaction.options.getChannel("salon");
+        await updateGuildConfig(guildId, { raidAlertChannelId: salon?.id ?? null });
+        await reply(
+          interaction,
+          salon
+            ? `Les alertes anti-raid iront dans <#${salon.id}>.`
+            : "Les alertes anti-raid repartiront dans les logs « modération ».",
+        );
+        return;
+      }
+      case "antiraid/deverrouiller": {
+        const lifted = await liftLockdown(interaction.guild, true);
+        await reply(
+          interaction,
+          lifted
+            ? "Verrouillage levé : invitations rétablies et vérification remise à son niveau."
+            : "Aucun verrouillage en cours.",
+        );
+        return;
+      }
+      case "antiraid/voir": {
+        const cfg = await getGuildConfig(guildId);
+        await interaction.reply({
+          embeds: [
+            brandEmbed()
+              .setTitle("🛡️ Anti-raid")
+              .setDescription(
+                [
+                  `**Rafale** ${cfg.raidJoinThreshold ? `${cfg.raidJoinThreshold} arrivées / ${cfg.raidWindowSec} s` : "*détection désactivée*"}`,
+                  `**Verrouillage** ${cfg.raidLockdownMinutes} min, invitations ${cfg.raidPauseInvites ? "coupées" : "ouvertes"}`,
+                  `**Âge minimal** ${cfg.raidMinAccountAgeDays ? `${cfg.raidMinAccountAgeDays} j → ${cfg.raidQuarantineRoleId ? `<@&${cfg.raidQuarantineRoleId}>` : "expulsion"}` : "*pas de contrôle*"}`,
+                  `**Alertes** ${cfg.raidAlertChannelId ? `<#${cfg.raidAlertChannelId}>` : "*logs « modération »*"}`,
+                  `**État** ${cfg.raidUntil ? `🚨 verrouillé jusqu'à <t:${Math.floor(cfg.raidUntil.getTime() / 1_000)}:t>` : "🟢 normal"}`,
+                ].join("\n"),
+              ),
+          ],
+          flags: MessageFlags.Ephemeral,
+        });
         return;
       }
     }

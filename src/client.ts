@@ -22,6 +22,9 @@ export class CloverClient extends Client {
         GatewayIntentBits.GuildInvites,
         // Bannissements/débannissements pour les logs (intent non privilégié).
         GatewayIntentBits.GuildModeration,
+        // Déclenchements des règles AutoMod, pour les logs (intent non privilégié).
+        // Le filtrage lui-même est fait par Discord, sans MessageContent.
+        GatewayIntentBits.AutoModerationExecution,
       ],
       partials: [],
       // Déclaré ici (et non après la connexion) : discord.js le renvoie dans

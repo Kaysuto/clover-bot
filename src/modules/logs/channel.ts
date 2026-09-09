@@ -11,6 +11,7 @@ export const LOG_CATEGORIES = {
   moderation: "Modération",
   vocal: "Vocal",
   serveur: "Serveur",
+  automod: "AutoMod",
 } as const;
 
 export type LogCategory = keyof typeof LOG_CATEGORIES;

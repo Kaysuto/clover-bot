@@ -58,12 +58,17 @@ const ticket: Command = {
     ),
   async execute(interaction, client) {
     const sub = interaction.options.getSubcommand();
+    // Publication du panneau, lecture du ticket en base, réécriture des
+    // permissions, archivage : chaque branche fait au moins un aller-retour
+    // avant de pouvoir répondre, donc au-delà des 3 s d'accusé de réception de
+    // Discord. Différé éphémère : ce qui doit rester visible du salon est
+    // publié par `channel.send`.
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     if (sub === "setup") {
       if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-        await interaction.reply({
+        await interaction.editReply({
           embeds: [errorEmbed("Réservé aux administrateurs.")],
-          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -74,9 +79,8 @@ const ticket: Command = {
           : interaction.channel
       ) as TextChannel | null;
       if (!channel) {
-        await interaction.reply({
+        await interaction.editReply({
           embeds: [errorEmbed("Salon introuvable.")],
-          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -85,9 +89,8 @@ const ticket: Command = {
         ticketPanelChannelId: channel.id,
         ticketPanelMessageId: panel.id,
       });
-      await interaction.reply({
+      await interaction.editReply({
         embeds: [successEmbed(`Panneau de tickets publié dans ${channel}.`)],
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -95,9 +98,8 @@ const ticket: Command = {
     // add / remove / close : uniquement dans un salon ticket
     const row = await getTicketByChannel(interaction.channelId);
     if (!row || row.status === "CLOSED") {
-      await interaction.reply({
+      await interaction.editReply({
         embeds: [errorEmbed("Cette commande s'utilise dans un salon ticket ouvert.")],
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -105,9 +107,8 @@ const ticket: Command = {
     // Même contrôle que les boutons du ticket : auteur, rôle support ou ManageGuild.
     const cfg = await getGuildConfig(interaction.guildId);
     if (!canManageTicket(interaction.member, cfg, row)) {
-      await interaction.reply({
+      await interaction.editReply({
         embeds: [errorEmbed("Seuls l'auteur du ticket et le staff peuvent gérer ce ticket.")],
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -117,39 +118,40 @@ const ticket: Command = {
     if (sub === "add" || sub === "remove") {
       const member = interaction.options.getMember("membre");
       if (!member) {
-        await interaction.reply({
+        await interaction.editReply({
           embeds: [errorEmbed("Membre introuvable sur ce serveur.")],
-          flags: MessageFlags.Ephemeral,
         });
         return;
       }
+      // L'arrivée et le départ d'un participant restent visibles du salon : le
+      // différé étant éphémère, l'annonce passe par le salon lui-même.
       if (sub === "add") {
         await channel.permissionOverwrites.edit(member.id, {
           ViewChannel: true,
           SendMessages: true,
           ReadMessageHistory: true,
         });
-        await interaction.reply({
+        await channel.send({
           embeds: [successEmbed(`${member} a été ajouté au ticket.`)],
         });
       } else {
         if (member.id === row.openerId) {
-          await interaction.reply({
+          await interaction.editReply({
             embeds: [errorEmbed("Impossible de retirer l'auteur du ticket.")],
-            flags: MessageFlags.Ephemeral,
           });
           return;
         }
         await channel.permissionOverwrites.delete(member.id);
-        await interaction.reply({
+        await channel.send({
           embeds: [successEmbed(`${member.displayName} a été retiré du ticket.`)],
         });
       }
+      await interaction.editReply({ content: "C'est fait." });
       return;
     }
 
     // close
-    await interaction.reply({
+    await interaction.editReply({
       embeds: [successEmbed("Fermeture du ticket, archivage en cours… 🔒")],
     });
     const closed = await closeTicket(
@@ -160,7 +162,9 @@ const ticket: Command = {
       interaction.options.getString("raison"),
     );
     if (!closed.ok) {
-      await interaction.followUp({ embeds: [errorEmbed(closed.error)] });
+      // Le salon existe toujours (fermeture abandonnée) : on remplace l'accusé
+      // de réception par la raison de l'échec.
+      await interaction.editReply({ embeds: [errorEmbed(closed.error)] });
     }
   },
 };

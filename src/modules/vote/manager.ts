@@ -1,12 +1,13 @@
-import { and, desc, eq, isNotNull, lte, sql } from "drizzle-orm";
+import type { Guild } from "discord.js";
+import { and, desc, eq, gte, isNotNull, lte, sql } from "drizzle-orm";
 import type { CloverClient } from "../../client";
 import { db } from "../../db";
 import { getGuildConfig } from "../../db/guild-config";
-import { botMinecraftLinks, botVotes } from "../../db/schema";
-import { usersMeta } from "../../db/site-schema";
+import { botVotes } from "../../db/schema";
 import { brandEmbed } from "../../lib/embeds";
 import { logger } from "../../lib/logger";
 import { rconBroadcast } from "../../lib/rcon";
+import { getDiscordIdByPlayer } from "../sync/manager";
 
 export type VoteRow = typeof botVotes.$inferSelect;
 
@@ -18,13 +19,30 @@ export interface RecordVoteInput {
 export interface RecordVoteResult {
   vote: VoteRow;
   discordId: string | null;
-  /** Serveurs Minecraft ayant exécuté la récompense. */
-  rewardedOn: string[];
+  /** Vote déjà reçu dans la fenêtre anti-rejeu : rien n'a été réenregistré. */
+  duplicate: boolean;
 }
 
 /**
- * Enregistre un vote et déclenche les récompenses : commande console pour le
- * joueur, rôle temporaire et annonce Discord si le compte est lié.
+ * Fenêtre anti-rejeu. Une liste qui ne voit pas notre réponse (délai dépassé,
+ * erreur réseau) repose le même vote : sans ce garde-fou, la récompense en jeu
+ * serait versée deux fois. Bien plus court que l'intervalle réel entre deux
+ * votes (24 h chez les listes), assez long pour couvrir les retentatives.
+ */
+const DEDUP_WINDOW_MS = 10 * 60_000;
+
+/** Guilde de référence : celle où le membre se trouve, sinon la seule connue. */
+function resolveGuild(client: CloverClient, discordId: string | null): Guild | null {
+  const owning = discordId
+    ? client.guilds.cache.find((g) => g.members.cache.has(discordId))
+    : undefined;
+  return owning ?? client.guilds.cache.first() ?? null;
+}
+
+/**
+ * Historise un vote, sans rien récompenser : les récompenses sont à la charge
+ * de `deliverVoteRewards`, pour que l'appelant HTTP puisse répondre dès que le
+ * vote est durable au lieu d'attendre la diffusion RCON.
  *
  * Le vote est historisé même sans compte lié : la liste des serveurs ne connaît
  * que le pseudo Minecraft, et le joueur doit pouvoir lier son compte plus tard.
@@ -34,15 +52,16 @@ export async function recordVote(
   input: RecordVoteInput,
 ): Promise<RecordVoteResult> {
   const username = input.username.trim();
-  const discordId = await resolveDiscordId(username);
+  const site = input.site.slice(0, 64);
+  const discordId = await getDiscordIdByPlayer({ username });
 
-  // Une seule guilde en pratique, mais la config est par guilde : on prend
-  // celle où le membre se trouve, sinon la première connue.
-  const guild =
-    (discordId
-      ? client.guilds.cache.find((g) => g.members.cache.has(discordId))
-      : null) ?? client.guilds.cache.first();
+  const replayed = await findRecentVote(site, username);
+  if (replayed) {
+    logger.info({ site, username }, "Vote déjà enregistré (rejeu ignoré)");
+    return { vote: replayed, discordId: replayed.discordId, duplicate: true };
+  }
 
+  const guild = resolveGuild(client, discordId);
   const cfg = guild ? await getGuildConfig(guild.id) : null;
   const roleExpiresAt =
     cfg?.voteRoleId && discordId
@@ -52,7 +71,7 @@ export async function recordVote(
   const [vote] = await db
     .insert(botVotes)
     .values({
-      site: input.site.slice(0, 64),
+      site,
       minecraftUsername: username,
       discordId,
       roleExpiresAt,
@@ -61,7 +80,46 @@ export async function recordVote(
     .returning();
   if (!vote) throw new Error("Vote non enregistré");
 
-  const rewardedOn = cfg?.voteRconCommand
+  logger.info({ site, username, discordId }, "Vote enregistré");
+  return { vote, discordId, duplicate: false };
+}
+
+/** Le même vote a-t-il déjà été reçu à l'instant ? (retentative de la liste) */
+async function findRecentVote(site: string, username: string): Promise<VoteRow | null> {
+  const [row] = await db
+    .select()
+    .from(botVotes)
+    .where(
+      and(
+        eq(botVotes.site, site),
+        sql`lower(${botVotes.minecraftUsername}) = ${username.toLowerCase()}`,
+        gte(botVotes.votedAt, new Date(Date.now() - DEDUP_WINDOW_MS)),
+      ),
+    )
+    .orderBy(desc(botVotes.votedAt))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Récompenses d'un vote : commande console sur tous les serveurs, rôle
+ * temporaire et annonce Discord si le compte est lié. Retourne les serveurs
+ * Minecraft ayant exécuté la commande.
+ *
+ * Séparé de l'enregistrement : la diffusion RCON et les appels Discord se
+ * comptent en secondes, et la liste qui a posté le vote ne doit pas les
+ * attendre — un délai dépassé de son côté la ferait rejouer le vote.
+ */
+export async function deliverVoteRewards(
+  client: CloverClient,
+  vote: VoteRow,
+): Promise<string[]> {
+  const username = vote.minecraftUsername;
+  const guild = resolveGuild(client, vote.discordId);
+  const cfg = guild ? await getGuildConfig(guild.id) : null;
+  if (!cfg) return [];
+
+  const rewardedOn = cfg.voteRconCommand
     ? await rconBroadcast(cfg.voteRconCommand.replaceAll("{player}", username)).catch(
         (err) => {
           logger.warn({ err, username }, "Récompense de vote impossible");
@@ -70,7 +128,8 @@ export async function recordVote(
       )
     : [];
 
-  if (guild && cfg && discordId) {
+  if (guild && vote.discordId) {
+    const discordId = vote.discordId;
     if (cfg.voteRoleId) {
       const member = await guild.members.fetch(discordId).catch(() => null);
       await member?.roles
@@ -87,7 +146,7 @@ export async function recordVote(
             embeds: [
               brandEmbed()
                 .setDescription(
-                  `🗳️ <@${discordId}> (\`${username}\`) vient de voter sur **${input.site}** — merci ! C'est son **${total}ᵉ** vote.`,
+                  `🗳️ <@${discordId}> (\`${username}\`) vient de voter sur **${vote.site}** — merci ! C'est son **${total}ᵉ** vote.`,
                 )
                 .setTimestamp(),
             ],
@@ -97,27 +156,7 @@ export async function recordVote(
     }
   }
 
-  logger.info({ site: input.site, username, discordId }, "Vote enregistré");
-  return { vote, discordId, rewardedOn };
-}
-
-/** Pseudo Minecraft → Discord, en interrogeant les deux tables de liaison. */
-async function resolveDiscordId(username: string): Promise<string | null> {
-  const needle = username.toLowerCase();
-
-  const [site] = await db
-    .select({ discordId: usersMeta.discordId })
-    .from(usersMeta)
-    .where(sql`lower(${usersMeta.minecraftUsername}) = ${needle}`)
-    .limit(1);
-  if (site?.discordId) return site.discordId;
-
-  const [code] = await db
-    .select({ discordId: botMinecraftLinks.discordId })
-    .from(botMinecraftLinks)
-    .where(sql`lower(${botMinecraftLinks.minecraftUsername}) = ${needle}`)
-    .limit(1);
-  return code?.discordId ?? null;
+  return rewardedOn;
 }
 
 export async function countVotes(username: string): Promise<number> {

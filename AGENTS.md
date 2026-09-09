@@ -15,11 +15,14 @@ Bot Discord officiel du réseau Clover Games. Dépôt git indépendant au sein d
 
 - **Les serveurs du réseau vivent en base, les mots de passe RCON dans le `.env`** : `bot_servers` (sans `guild_id` : elle décrit le réseau, pas la guilde) porte hôte, port et allocation RCON ; le mot de passe se lit dans `RCON_PASSWORD_<CLE>`, jamais en base — elle est partagée avec le site. `seedServers()` crée les six serveurs au démarrage, `/reseau` les modifie ensuite.
 - **Une sanction est répercutée en jeu par des commandes configurables** : les défauts (`ban`, `pardon`, `kick`…) sont vanilla ; un plugin de sanctions impose de les redéfinir avec `/config moderation commande`. La propagation est diffusée à TOUS les serveurs dont le RCON répond (`rconBroadcast`) — un bannissement qui ne couvre que le lobby ne vaut rien.
+- **Les règles AutoMod appartiennent à Discord** : `bot_automod_rules` ne retient que leur identifiant, jamais les mots, seuils ou exemptions, qui restent éditables dans les Paramètres du serveur. Le filtrage étant fait par Discord avant publication, il ne demande pas l'intent MessageContent — en revanche `content` et `matchedContent` de `autoModerationActionExecution` arrivent vides tant que cet intent est absent : ne jamais bâtir un traitement sur ces champs. Créer ou modifier une règle exige la permission « Gérer le serveur ».
 - **LuckPerms est lu dans sa propre base** (`LUCKPERMS_DB_*`, `lib/lp-db.ts`), jamais via `mc-db.ts` : la base du plugin clover-core reste limitée aux tables du module `link`.
 - **Le bot ne déplace jamais d'argent lui-même** : les crédits sont l'économie in-game du plugin (`economy`), pas une monnaie Discord. Toute lecture de solde, tout achat et tout versement passe par `lib/site-api.ts` → `/api/internal/bot/*` du site, qui tient le verrou, le débit RCON et la trace dans `shop_orders`. Ne jamais écrire dans l'économie MySQL ni recréer un catalogue : `bot_*` ne contient aucun solde.
 - **Échelle de valeur : 100 crédits = 1,00 €**, et le jeu rapporte 1 crédit par heure active (`Plugin/clover/documentation/modules/economy.md`). Toute nouvelle récompense en crédits se compare à cette échelle avant d'être activée — une invitation payée trop cher devient une prime à la création de comptes.
 - **Les récompenses de parrainage mûrissent avant d'être versées** : rien à l'arrivée, tout à J+7 après contrôle (âge du compte, filleul toujours présent, compte lié ou niveau atteint, anti-recyclage, plafond mensuel). Les crédits se versent **avant** l'XP, parce qu'ils sont idempotents côté site et l'XP non : un site injoignable doit laisser la ligne rejouable.
-- **L'endpoint de vote est un port public** : il ne s'ouvre que si `VOTE_HTTP_PORT` **et** `VOTE_TOKEN` sont définis, le jeton est comparé en temps constant et c'est la seule protection. Ne jamais y ajouter de route qui écrit sans ce contrôle.
+- **Le serveur d'entrée HTTP est un port public** (`lib/ingress.ts`) : il ne s'ouvre que si `VOTE_HTTP_PORT` est défini, et **chaque route porte son propre jeton** — `VOTE_TOKEN` pour `/vote`, `GAME_TOKEN` pour `/game`. Jamais de jeton partagé : celui des votes est distribué à des tiers (chaque liste le détient), alors que `/game` déclenche des actions de modération. Les jetons sont comparés en temps constant, c'est la seule protection ; ne jamais ajouter de route qui écrit sans passer par `registerIngressRoute`.
+- **Une sanction reçue du jeu n'est jamais repropagée** : `applySanction`/`revokeSanction` acceptent `propagate: false`, que `modules/game` utilise systématiquement — sinon le bannissement repart en RCON, le plugin le renvoie, et la boucle s'installe. Deuxième garde-fou obligatoire côté entrée : sanction Discord déjà active, ou sanction identique de moins de deux minutes (`hasRecentSanction`), sont ignorées comme des échos de notre propre propagation.
+- **L'anti-raid ne fait jamais d'action de masse** : un verrouillage ferme la porte (invitations coupées, vérification relevée) et n'expulse personne ; seul le contrôle d'âge écarte un compte, par quarantaine ou expulsion — jamais par bannissement, un faux positif devant rester réversible. L'échéance du verrouillage vit en base (`raidUntil`) et non en mémoire : un redémarrage ne doit pas laisser un serveur fermé sans personne pour le rouvrir (job `raid-lockdown`).
 
 ## Architecture
 
@@ -32,12 +35,13 @@ src/
 ├─ components.ts       routage des customId "prefix:action:args" par préfixe
 ├─ commands/<domaine>/ commandes slash (1 fichier = 1 commande)
 ├─ events/             1 fichier = 1 événement gateway, logique déléguée aux modules
-├─ modules/<feature>/  logique métier (applications, boost, giveaways, invites,
-│                      leveling, logs, moderation, mc-counter, ranks, status,
-│                      suggestions, sync, tempvoice, tickets, vote, welcome)
+├─ modules/<feature>/  logique métier (antiraid, applications, automod, boost, game,
+│                      giveaways, invites, leveling, logs, moderation, mc-counter,
+│                      ranks, status, suggestions, sync, tempvoice, tickets, vote,
+│                      welcome)
 ├─ db/                 schema.ts (tables bot_*), site-schema.ts (miroir RO),
 │                      guild-config.ts (helper + cache), index.ts (pool pg + drizzle)
-└─ lib/                logger, scheduler, servers, mc-status, rcon, lp-db,
+└─ lib/                logger, scheduler, ingress, servers, mc-status, rcon, lp-db,
                        heartbeat, embeds, ids, duration
 ```
 
