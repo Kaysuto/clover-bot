@@ -18,6 +18,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
+COPY drizzle ./drizzle
 
 # Le bot n'écrit que dans /tmp : aucun droit sur /app n'est nécessaire.
 USER node

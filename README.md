@@ -55,7 +55,7 @@ https://discord.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot+application
 ```bash
 cp .env.example .env    # puis remplir DISCORD_TOKEN, DISCORD_GUILD_ID, DATABASE_URL…
 npm install
-npm run db:migrate      # crée les tables bot_* sur Supabase
+npm run db:migrate      # facultatif : applique les migrations avant le démarrage
 npm run deploy          # publie les slash commands (le bot le fait aussi au démarrage)
 npm run dev             # démarre en mode développement
 ```
@@ -99,7 +99,7 @@ docker compose logs -f bot
 ```
 
 - `restart: unless-stopped` relance le conteneur automatiquement après un crash ou un redémarrage du VPS (tant que le démon Docker démarre au boot — actif par défaut sur la plupart des distributions).
-- Les migrations (`npm run db:migrate`) continuent de s'exécuter **hors du conteneur** (en local ou en CI), directement contre la base Supabase partagée — comme en développement. `DATABASE_URL` pointe sur `postgres_session` : le mode transaction de PgBouncer supporte mal le DDL.
+- **Migrations** : le bot applique les migrations embarquées au démarrage, avant de se connecter à Discord et de lancer les jobs. Le journal reste `drizzle.__bot_migrations`, séparé de celui du site ; les migrations déjà appliquées ne sont pas rejouées. En cas d'échec, le processus sort en erreur. `npm run db:migrate` reste disponible en local ou en CI. Utiliser une connexion PostgreSQL directe ou le mode session de PgBouncer (`postgres_session`) pour `DATABASE_URL` : le verrou des migrations exige de conserver la même session.
 - **Slash commands** : le bot compare ses commandes à celles enregistrées sur la guilde à chaque démarrage et ne republie qu'en cas d'écart — une commande ajoutée au code ne peut donc plus rester invisible sur Discord. `npm run deploy` reste utile pour publier sans redémarrer. Seules les commandes **de guilde** sont touchées : les commandes globales de l'application (intégration Minecraft) ne sont jamais écrasées.
 - Mise à jour : `git pull && docker compose up -d --build`.
 

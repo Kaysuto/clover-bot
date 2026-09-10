@@ -3,6 +3,7 @@ import { commands } from "./commands";
 import { componentHandlers, dmComponentHandlers } from "./components";
 import { env } from "./config";
 import { pool } from "./db";
+import { migrateDatabase } from "./db/migrate";
 import { events } from "./events";
 import { logger } from "./lib/logger";
 import { stopIngress } from "./lib/ingress";
@@ -64,7 +65,19 @@ async function shutdown(signal: string): Promise<void> {
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-client.login(env.DISCORD_TOKEN).catch((err) => {
+async function start(): Promise<void> {
+  logger.info("Application des migrations de la base du bot…");
+  try {
+    await migrateDatabase();
+  } catch (err) {
+    logger.fatal({ err }, "Migration de la base impossible, démarrage annulé");
+    return process.exit(1);
+  }
+  logger.info("Base du bot à jour");
+  await client.login(env.DISCORD_TOKEN);
+}
+
+start().catch((err) => {
   logger.fatal({ err }, "Connexion à Discord impossible (token invalide ?)");
   process.exit(1);
 });
