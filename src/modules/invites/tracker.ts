@@ -4,6 +4,7 @@ import { db } from "../../db";
 import { botInviteJoins } from "../../db/schema";
 import { logger } from "../../lib/logger";
 import { announceInvite } from "./announce";
+import { moduleEnabled } from "../dashboard/modules";
 import {
   bumpInviteStat,
   deleteInvite,
@@ -22,6 +23,7 @@ interface Candidate {
  * avec le cache pour identifier l'invitation utilisée.
  */
 export async function trackJoin(member: GuildMember): Promise<void> {
+  if (!await moduleEnabled(member.guild.id, "invites")) return;
   if (member.user.bot) return; // les bots arrivent via OAuth, pas via invitation
   const guild = member.guild;
 

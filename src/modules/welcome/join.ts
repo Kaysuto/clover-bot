@@ -77,7 +77,7 @@ export async function sendWelcomeDm(member: GuildMember): Promise<void> {
   if (member.user.bot) return;
 
   const cfg = await getGuildConfig(member.guild.id);
-  if (!cfg.welcomeDmEnabled) return;
+  if (!cfg.welcomeDmEnabled || cfg.disabledModules.includes("welcome")) return;
 
   await member
     .send({

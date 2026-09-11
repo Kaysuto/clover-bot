@@ -71,6 +71,7 @@ export async function applySanction(
 ): Promise<ApplySanctionResult> {
   const { guild, target, moderator, type, reason } = input;
   const cfg = await getGuildConfig(guild.id);
+  if (cfg.disabledModules.includes("moderation")) throw new Error("Le module Modération est désactivé.");
   const durationMs = type === "MUTE" || type === "BAN" ? (input.durationMs ?? null) : null;
   const expiresAt = durationMs ? new Date(Date.now() + durationMs) : null;
 

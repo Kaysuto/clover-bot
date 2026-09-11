@@ -4,6 +4,7 @@ import { db } from "../../db";
 import { getGuildConfig } from "../../db/guild-config";
 import { botLogSettings } from "../../db/schema";
 import { logger } from "../../lib/logger";
+import { recordAudit } from "../dashboard/statistics";
 
 /** Catégories de logs (clé technique → libellé affiché). */
 export const LOG_CATEGORIES = {
@@ -56,6 +57,7 @@ export async function sendLog(
     const channel = await resolveLogChannel(guild, category);
     if (!channel) return;
     await channel.send({ embeds: [embed] });
+    await recordAudit(guild.id, "Discord", "Événement · " + LOG_CATEGORIES[category]);
   } catch (err) {
     logger.warn({ err, guildId: guild.id, category }, "Publication du log impossible");
   }
@@ -70,6 +72,7 @@ async function resolveLogChannel(
   if (setting && !setting.enabled) return null;
 
   const cfg = await getGuildConfig(guild.id);
+  if (cfg.disabledModules.includes("logs")) return null;
   const channelId = setting?.channelId ?? cfg.logChannelId;
   if (!channelId) return null;
 

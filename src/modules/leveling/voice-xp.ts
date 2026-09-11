@@ -12,6 +12,7 @@ import { grantXpMany } from "./xp";
 export async function tickVoiceXp(client: CloverClient): Promise<void> {
   for (const guild of client.guilds.cache.values()) {
     const cfg = await getGuildConfig(guild.id);
+    if (cfg.disabledModules.includes("levels")) continue;
     if (cfg.voiceXpPerMin <= 0) continue;
 
     const byChannel = new Map<string, VoiceState[]>();

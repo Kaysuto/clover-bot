@@ -1,4 +1,6 @@
 import { syncGuildCommands } from "../lib/command-sync";
+import { createDashboardRoute } from "../modules/dashboard/route";
+import { sampleMembers } from "../modules/dashboard/statistics";
 import { touchHeartbeat } from "../lib/heartbeat";
 import { logger } from "../lib/logger";
 import { registerIngressRoute, startIngress } from "../lib/ingress";
@@ -170,6 +172,8 @@ const ready: EventHandler<"clientReady"> = {
     // et chaque route reste fermée tant que SON jeton manque (cf. lib/ingress.ts).
     registerIngressRoute(createVoteRoute(client));
     registerIngressRoute(createGameRoute(client));
+    registerIngressRoute(createDashboardRoute(client));
+    registerJob({ name: "dashboard-members", intervalMs: 60_000, run: () => sampleMembers(client), runOnStart: true });
     startIngress();
 
     logger.info("🍀 Clover Bot prêt !");

@@ -118,7 +118,7 @@ export async function sendLeaveSurvey(
 
   const guild = member.guild;
   const cfg = await getGuildConfig(guild.id);
-  if (!cfg.leaveSurveyEnabled) return;
+  if (!cfg.leaveSurveyEnabled || cfg.disabledModules.includes("departure")) return;
 
   // Un membre banni ou expulsé n'a pas choisi de partir : lui demander pourquoi
   // serait déplacé, et sa réponse fausserait les statistiques.

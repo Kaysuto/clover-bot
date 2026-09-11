@@ -14,8 +14,32 @@ import {
 
 // ─── Configuration par guilde ────────────────────────────────────────────────
 
+export const botDashboardDaily = pgTable("bot_dashboard_daily", {
+  guildId: text("guild_id").notNull(),
+  day: text("day").notNull(),
+  messages: integer("messages").notNull().default(0),
+  members: integer("members"),
+  observedAt: timestamp("observed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("bot_dashboard_daily_guild_day").on(t.guildId, t.day)]);
+export const botDashboardAudit = pgTable("bot_dashboard_audit", {
+  id: serial("id").primaryKey(),
+  guildId: text("guild_id").notNull(),
+  actorId: text("actor_id").notNull(),
+  action: text("action").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+export const botDashboardRequests = pgTable("bot_dashboard_requests", {
+  guildId: text("guild_id").notNull(),
+  requestKey: text("request_key").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  result: text("result"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("bot_dashboard_requests_unique").on(t.guildId,t.requestKey)]);
 export const botGuildConfig = pgTable("bot_guild_config", {
   guildId: text("guild_id").primaryKey(),
+  configVersion: integer("config_version").notNull().default(0),
+  disabledModules: text("disabled_modules").array().notNull().default(sql`'{}'::text[]`),
 
   // Niveaux (les passages de niveau sont annoncés en message privé)
   levelupMessage: text("levelup_message")

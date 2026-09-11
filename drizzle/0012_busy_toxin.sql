@@ -1,0 +1,2 @@
+ALTER TABLE "bot_guild_config" ADD COLUMN "config_version" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "bot_guild_config" ADD COLUMN "disabled_modules" text[] DEFAULT '{}'::text[] NOT NULL;

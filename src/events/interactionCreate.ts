@@ -1,4 +1,5 @@
 import { MessageFlags } from "discord.js";
+import { commandModule, componentModule, moduleEnabled } from "../modules/dashboard/modules";
 import { errorEmbed } from "../lib/embeds";
 import { parseId } from "../lib/ids";
 import { logger } from "../lib/logger";
@@ -24,6 +25,11 @@ const interactionCreate: EventHandler<"interactionCreate"> = {
           logger.warn({ command: interaction.commandName }, "Commande inconnue");
           return;
         }
+        const module = commandModule(interaction.commandName, interaction.options.getSubcommand(false));
+        if (module && !await moduleEnabled(interaction.guildId, module)) {
+          await interaction.reply({ content: "Ce module est désactivé sur ce serveur.", flags: MessageFlags.Ephemeral });
+          return;
+        }
         await command.execute(interaction, client);
         return;
       }
@@ -39,6 +45,11 @@ const interactionCreate: EventHandler<"interactionCreate"> = {
         }
         if (!interaction.inCachedGuild()) return;
         const handler = client.components.get(prefix);
+        const module = componentModule(prefix, action);
+        if (module && !await moduleEnabled(interaction.guildId, module)) {
+          await interaction.reply({ content: "Ce module est désactivé sur ce serveur.", flags: MessageFlags.Ephemeral });
+          return;
+        }
         if (handler) await handler(interaction, action, args, client);
         return;
       }

@@ -52,6 +52,7 @@ const envSchema = z.object({
 
   // Serveur d'entrée HTTP (cf. lib/ingress.ts) : un port, un jeton par route.
   VOTE_HTTP_PORT: optionalPort,
+  DASHBOARD_TOKEN: z.preprocess((v) => v === "" ? undefined : v, z.string().min(32).optional()),
   /** Jeton des listes de serveurs Minecraft (route `/vote`). */
   VOTE_TOKEN: optionalString,
   /** Jeton du plugin clover-core (route `/game`) — jamais le même que le précédent. */
@@ -76,6 +77,10 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+if (env.DASHBOARD_TOKEN && (env.DASHBOARD_TOKEN === env.VOTE_TOKEN || env.DASHBOARD_TOKEN === env.GAME_TOKEN)) {
+  console.error("DASHBOARD_TOKEN doit être distinct des jetons de vote et du jeu.");
+  process.exit(1);
+}
 
 export const rconConfigured = Boolean(
   env.RCON_HOST && env.RCON_PORT && env.RCON_PASSWORD,

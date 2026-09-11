@@ -29,9 +29,11 @@ export interface IngressRequest {
 export interface IngressReply {
   status: number;
   message: string;
+  data?: unknown;
 }
 
 export interface IngressRoute {
+  headerOnly?: string;
   /** Chemin exact, barre oblique comprise : `/vote`. */
   path: string;
   /** Jeton attendu ; la route reste fermée tant qu'il est absent du `.env`. */
@@ -104,9 +106,9 @@ export function startIngress(): void {
   if (server || !env.VOTE_HTTP_PORT || routes.size === 0) return;
 
   server = createServer((req, res) => {
-    const reply = (status: number, message: string) => {
+    const reply = (status: number, message: string, data?: unknown) => {
       res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ ok: status < 400, message }));
+      res.end(JSON.stringify({ ok: status < 400, message, ...(data === undefined ? {} : { data }) }));
     };
 
     const ip = req.socket.remoteAddress ?? "inconnu";
@@ -121,6 +123,7 @@ export function startIngress(): void {
       reply(404, "Chemin inconnu");
       return;
     }
+    if (route.headerOnly && req.method !== "POST") { reply(405, "Méthode non autorisée"); return; }
 
     const chunks: Buffer[] = [];
     let size = 0;
@@ -143,7 +146,7 @@ export function startIngress(): void {
           ),
         };
 
-        const token =
+        const token = route.headerOnly ? (typeof req.headers[route.headerOnly] === "string" ? req.headers[route.headerOnly] as string : null) :
           (req.headers["x-clover-token"] as string | undefined) ??
           // Nom historique, conservé pour les listes de vote déjà configurées.
           (req.headers["x-vote-token"] as string | undefined) ??
@@ -157,7 +160,7 @@ export function startIngress(): void {
 
         try {
           const result = await route.handle({ payload, ip });
-          reply(result.status, result.message);
+          reply(result.status, result.message, result.data);
         } catch (err) {
           logger.error({ err, path: route.path }, "Route d'entrée en erreur");
           reply(500, "Erreur interne");

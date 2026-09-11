@@ -16,35 +16,15 @@ import {
   sanctionEmbed,
 } from "../../modules/moderation/sanctions";
 import type { Command } from "../../types";
+import { targetRefusal } from "../../modules/moderation/target";
 
 /**
  * Garde-fous hiérarchiques : Discord refuserait de toute façon l'action, mais
  * un message clair vaut mieux qu'un « permissions ? » après coup — et la
  * sanction ne doit surtout pas être historisée si elle ne peut pas s'appliquer.
  */
-async function refuseTarget(
-  interaction: ChatInputCommandInteraction<"cached">,
-  target: User,
-): Promise<string | null> {
-  if (target.id === interaction.user.id) return "Tu ne peux pas te sanctionner toi-même.";
-  if (target.id === interaction.client.user?.id) return "Je ne peux pas me sanctionner.";
-  if (target.id === interaction.guild.ownerId)
-    return "Le propriétaire du serveur ne peut pas être sanctionné.";
-
-  const member = await interaction.guild.members.fetch(target.id).catch(() => null);
-  if (!member) return null; // plus sur le serveur : le bannissement reste possible
-
-  if (
-    member.roles.highest.position >= interaction.member.roles.highest.position &&
-    interaction.user.id !== interaction.guild.ownerId
-  ) {
-    return "Ce membre a un rôle supérieur ou égal au tien.";
-  }
-  const me = interaction.guild.members.me;
-  if (me && member.roles.highest.position >= me.roles.highest.position) {
-    return "Ce membre a un rôle supérieur au mien : je ne peux rien lui appliquer.";
-  }
-  return null;
+async function refuseTarget(interaction: ChatInputCommandInteraction<"cached">, target: User): Promise<string | null> {
+  return targetRefusal(interaction.guild, interaction.member, target);
 }
 
 const sanction: Command = {

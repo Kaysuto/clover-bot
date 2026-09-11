@@ -1,10 +1,12 @@
 import { logger } from "../lib/logger";
 import { handleMessageXp } from "../modules/leveling/xp";
+import { recordMessage } from "../modules/dashboard/statistics";
 import type { EventHandler } from "../types";
 
 const messageCreate: EventHandler<"messageCreate"> = {
   name: "messageCreate",
   async execute(_client, message) {
+    await recordMessage(message).catch((err) => logger.error({ err }, "Collecte des statistiques impossible"));
     await handleMessageXp(message).catch((err) =>
       logger.error({ err }, "Erreur lors du gain d'XP message"),
     );

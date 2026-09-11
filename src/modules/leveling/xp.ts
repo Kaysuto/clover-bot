@@ -39,6 +39,7 @@ export async function handleMessageXp(message: Message): Promise<void> {
   if (!message.inGuild() || message.author.bot || message.system) return;
 
   const cfg = await getGuildConfig(message.guildId);
+  if (cfg.disabledModules.includes("levels")) return;
   if (cfg.noXpChannelIds.includes(message.channelId)) return;
 
   const key = `${message.guildId}:${message.author.id}`;

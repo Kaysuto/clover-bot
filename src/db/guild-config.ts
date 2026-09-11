@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "./index";
 import { botGuildConfig } from "./schema";
 
@@ -53,11 +53,14 @@ async function loadGuildConfig(guildId: string): Promise<GuildConfig> {
 export async function updateGuildConfig(
   guildId: string,
   values: Partial<typeof botGuildConfig.$inferInsert>,
+  expectedVersion?: number,
 ): Promise<void> {
   await getGuildConfig(guildId); // garantit l'existence de la ligne
-  await db
+  const updated = await db
     .update(botGuildConfig)
-    .set({ ...values, updatedAt: new Date() })
-    .where(eq(botGuildConfig.guildId, guildId));
+    .set({ ...values, configVersion: sql`config_version + 1`, updatedAt: new Date() })
+    .where(and(eq(botGuildConfig.guildId, guildId), expectedVersion === undefined ? undefined : eq(botGuildConfig.configVersion, expectedVersion)))
+    .returning({ guildId: botGuildConfig.guildId });
   invalidateGuildConfig(guildId);
+  if (!updated.length) throw new Error("CONFIG_CONFLICT");
 }
