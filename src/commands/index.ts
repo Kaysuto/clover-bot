@@ -42,3 +42,21 @@ export const commands: Command[] = [
   suggestion,
   boutique,
 ];
+
+const CLOVER_COMMAND_NAMES = new Set([
+  "statut",
+  "reseau",
+  "sync",
+  "lier",
+  "delier",
+  "joueur",
+  "votes",
+  "boutique",
+]);
+
+export const cloverCommands = commands.filter((command) =>
+  CLOVER_COMMAND_NAMES.has(command.data.name),
+);
+export const publicCommands = commands.filter(
+  (command) => !CLOVER_COMMAND_NAMES.has(command.data.name),
+);

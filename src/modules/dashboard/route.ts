@@ -9,7 +9,7 @@ import {
 } from "discord.js";
 import { and, eq } from "drizzle-orm";
 import type { CloverClient } from "../../client";
-import { env } from "../../config";
+import { env, isCloverGuild } from "../../config";
 import { db, pool } from "../../db";
 import { getGuildConfig, updateGuildConfig } from "../../db/guild-config";
 import { botSanctions, botTickets, botGiveaways } from "../../db/schema";
@@ -100,7 +100,11 @@ export function createDashboardRoute(client: CloverClient): IngressRoute {
             [guildId],
           );
           const available = Object.fromEntries(
-            MODULE_IDS.map((id) => [id, !cfg.disabledModules.includes(id)]),
+            MODULE_IDS.map((id) => [
+              id,
+              !(id === "economy" && !isCloverGuild(guildId)) &&
+                !cfg.disabledModules.includes(id),
+            ]),
           );
           const safeConfig = Object.fromEntries(
             Object.keys(configPatch.shape).map((key) => [
@@ -112,6 +116,7 @@ export function createDashboardRoute(client: CloverClient): IngressRoute {
             modules: available,
             config: safeConfig,
             logSettings: await getLogSettings(guildId),
+            capabilities: { clover: isCloverGuild(guildId) },
             revision: String(cfg.configVersion),
             stats: {
               members: history.rows.at(-1)?.members ?? null,
@@ -157,6 +162,8 @@ export function createDashboardRoute(client: CloverClient): IngressRoute {
             ).rows,
           });
         if (operation === "economy") {
+          if (!isCloverGuild(guildId))
+            throw new Refusal(404, "Cette intégration n’est pas disponible sur ce serveur.");
           if (payload.userId) {
             const userId = snowflake.parse(payload.userId);
             if (!(await guild.members.fetch(userId).catch(() => null)))
@@ -244,6 +251,8 @@ export function createDashboardRoute(client: CloverClient): IngressRoute {
           const input = z
             .object({ id: z.enum(MODULE_IDS), enabled: z.boolean() })
             .parse(payload);
+          if (input.id === "economy" && !isCloverGuild(guildId))
+            throw new Refusal(404, "Cette intégration n’est pas disponible sur ce serveur.");
           const disabled = cfg.disabledModules.filter((id) => id !== input.id);
           if (!input.enabled) disabled.push(input.id);
           await updateGuildConfig(
@@ -476,6 +485,8 @@ export function createDashboardRoute(client: CloverClient): IngressRoute {
           return ok({ id: row.id });
         }
         if (operation === "economy.write") {
+          if (!isCloverGuild(guildId))
+            throw new Refusal(404, "Cette intégration n’est pas disponible sur ce serveur.");
           permitted(member, PermissionFlagsBits.ManageGuild);
           await requireModule(guildId, "economy");
           const input = z

@@ -1,7 +1,7 @@
 import type { Guild, GuildMember } from "discord.js";
 import { eq } from "drizzle-orm";
 import type { CloverClient } from "../../client";
-import { luckPermsConfigured } from "../../config";
+import { isCloverGuild, luckPermsConfigured } from "../../config";
 import { db } from "../../db";
 import { getGuildConfig } from "../../db/guild-config";
 import { botRankRoles } from "../../db/schema";
@@ -34,6 +34,7 @@ export async function syncMemberRanks(
   mapping?: RankRoleRow[],
 ): Promise<RankSyncResult> {
   const empty = { groups: [], added: [], removed: [] };
+  if (!isCloverGuild(member.guild.id)) return { status: "disabled", ...empty };
   const cfg = await getGuildConfig(member.guild.id);
   if (!cfg.rankSyncEnabled || !luckPermsConfigured) {
     return { status: "disabled", ...empty };
@@ -109,6 +110,7 @@ export async function syncGuildRanks(guild: Guild): Promise<{
 /** Job : passe sur toutes les guildes du client. */
 export async function tickRankSync(client: CloverClient): Promise<void> {
   for (const guild of client.guilds.cache.values()) {
+    if (!isCloverGuild(guild.id)) continue;
     await syncGuildRanks(guild).catch((err) =>
       logger.error({ err, guildId: guild.id }, "Synchro des grades impossible"),
     );

@@ -14,7 +14,12 @@ const optionalPort = z.preprocess(
 const envSchema = z.object({
   DISCORD_TOKEN: z.string().min(1, "DISCORD_TOKEN est requis"),
   DISCORD_CLIENT_ID: z.string().min(1, "DISCORD_CLIENT_ID est requis"),
-  DISCORD_GUILD_ID: z.string().min(1, "DISCORD_GUILD_ID est requis"),
+  /** Ancienne guilde unique, conservée comme repli pendant la migration. */
+  DISCORD_GUILD_ID: optionalString,
+  /** Guilde de développement : commandes instantanées, sans publication globale. */
+  DEV_GUILD_ID: optionalString,
+  /** Guildes autorisées à utiliser les intégrations privées Clover. */
+  CLOVER_GUILD_IDS: optionalString,
 
   DATABASE_URL: z.string().min(1, "DATABASE_URL est requis"),
 
@@ -104,3 +109,14 @@ export const gameEndpointConfigured = Boolean(env.VOTE_HTTP_PORT && env.GAME_TOK
 
 /** Pièces et boutique : sans ces deux variables, le bot ne parle pas d'argent. */
 export const siteApiConfigured = Boolean(env.SITE_API_URL && env.SITE_API_TOKEN);
+
+export const cloverGuildIds = new Set(
+  (env.CLOVER_GUILD_IDS ?? env.DISCORD_GUILD_ID ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean),
+);
+
+export function isCloverGuild(guildId: string): boolean {
+  return cloverGuildIds.has(guildId);
+}

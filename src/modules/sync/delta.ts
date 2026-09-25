@@ -5,6 +5,7 @@ import { getGuildConfig } from "../../db/guild-config";
 import { usersMeta } from "../../db/site-schema";
 import { logger } from "../../lib/logger";
 import { syncMember } from "./manager";
+import { isCloverGuild } from "../../config";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -34,6 +35,7 @@ export async function tickSiteLinksDelta(client: CloverClient): Promise<void> {
   }
 
   for (const guild of client.guilds.cache.values()) {
+    if (!isCloverGuild(guild.id)) continue;
     const cfg = await getGuildConfig(guild.id);
     for (const row of rows) {
       const member = await guild.members.fetch(row.discordId!).catch(() => null);

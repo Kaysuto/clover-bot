@@ -3,6 +3,7 @@ import { getGuildConfig } from "../../db/guild-config";
 import { brandEmbed } from "../../lib/embeds";
 import { logger } from "../../lib/logger";
 import { rconBroadcast } from "../../lib/rcon";
+import { isCloverGuild } from "../../config";
 import { getLinkedAccount } from "../sync/manager";
 
 export const DEFAULT_BOOST_MESSAGE =
@@ -47,7 +48,7 @@ export async function handleBoost(
     }
   }
 
-  if (!cfg.boostRconCommand) return;
+  if (!isCloverGuild(newMember.guild.id) || !cfg.boostRconCommand) return;
 
   const linked = await getLinkedAccount(newMember.id).catch(() => null);
   if (!linked) {

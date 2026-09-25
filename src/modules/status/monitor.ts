@@ -6,6 +6,7 @@ import { BRAND_COLOR, ERROR_COLOR, WARN_COLOR, brandEmbed } from "../../lib/embe
 import { logger } from "../../lib/logger";
 import { getMcStatus, getServerStatus } from "../../lib/mc-status";
 import { rconHealthCheck } from "../../lib/rcon";
+import { isCloverGuild } from "../../config";
 import { getServers, serverAddress } from "../../lib/servers";
 
 type Health = "up" | "down" | "unknown";
@@ -257,6 +258,7 @@ async function refreshStatusMessages(client: CloverClient): Promise<void> {
   const embed = buildStatusEmbed(client);
 
   for (const guild of client.guilds.cache.values()) {
+    if (!isCloverGuild(guild.id)) continue;
     const cfg = await getGuildConfig(guild.id);
     if (!cfg.statusChannelId) continue;
 

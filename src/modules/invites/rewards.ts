@@ -1,7 +1,7 @@
 import type { Guild } from "discord.js";
 import { and, asc, count, eq, lte, sql } from "drizzle-orm";
 import type { CloverClient } from "../../client";
-import { siteApiConfigured } from "../../config";
+import { isCloverGuild, siteApiConfigured } from "../../config";
 import { db } from "../../db";
 import { getGuildConfig, type GuildConfig } from "../../db/guild-config";
 import {
@@ -209,7 +209,7 @@ async function payout(
   const inviterId = row.inviterId!;
   const outcome: RewardOutcome = { xp: 0, credits: 0, tiers: [], retry: false };
 
-  if (cfg.inviteCredits > 0 && siteApiConfigured) {
+  if (cfg.inviteCredits > 0 && siteApiConfigured && isCloverGuild(guild.id)) {
     const result = await deposit({
       key: `discord:invite:${row.id}`,
       discordId: inviterId,
@@ -253,7 +253,7 @@ async function payout(
       .returning({ threshold: botInviteTierGrants.threshold });
     if (!claimed.length) continue;
 
-    if (!siteApiConfigured || tier.credits <= 0) {
+    if (!siteApiConfigured || !isCloverGuild(guild.id) || tier.credits <= 0) {
       outcome.tiers.push({ threshold: tier.threshold, credits: 0 });
       continue;
     }

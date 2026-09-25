@@ -8,6 +8,7 @@ import { formatDuration } from "../../lib/duration";
 import { BRAND_COLOR, ERROR_COLOR, WARN_COLOR, brandEmbed } from "../../lib/embeds";
 import { logger } from "../../lib/logger";
 import { rconBroadcast } from "../../lib/rcon";
+import { isCloverGuild } from "../../config";
 import { sendLog } from "../logs/channel";
 import { getLinkedAccount } from "../sync/manager";
 
@@ -245,7 +246,7 @@ async function propagate(
   player: string | null | undefined,
   ctx: { reason: string; durationMs: number | null },
 ): Promise<string[]> {
-  if (!cfg.sanctionPropagateMc || !player) return [];
+  if (!isCloverGuild(cfg.guildId) || !cfg.sanctionPropagateMc || !player) return [];
 
   const template = {
     WARN: null,

@@ -1,7 +1,7 @@
 import type { Guild } from "discord.js";
 import { z } from "zod";
 import type { CloverClient } from "../../client";
-import { env } from "../../config";
+import { cloverGuildIds } from "../../config";
 import { getGuildConfig } from "../../db/guild-config";
 import { BRAND_COLOR, ERROR_COLOR, WARN_COLOR, brandEmbed } from "../../lib/embeds";
 import type { IngressReply } from "../../lib/ingress";
@@ -54,11 +54,13 @@ const gameEvent = z.discriminatedUnion("type", [sanctionEvent, serverEvent]);
  */
 const ECHO_WINDOW_MS = 2 * 60_000;
 
-/** Guilde de référence : celle du `.env`, sinon la seule connue. */
+/** Guilde Clover explicitement autorisée à recevoir les événements privés. */
 function mainGuild(client: CloverClient): Guild | null {
-  return (
-    client.guilds.cache.get(env.DISCORD_GUILD_ID) ?? client.guilds.cache.first() ?? null
-  );
+  for (const guildId of cloverGuildIds) {
+    const guild = client.guilds.cache.get(guildId);
+    if (guild) return guild;
+  }
+  return null;
 }
 
 export async function handleGameEvent(

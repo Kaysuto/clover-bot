@@ -6,6 +6,7 @@ import { botServerCounters } from "../../db/schema";
 import { renameCounterChannel } from "../../lib/counter-channel";
 import { getMcStatus, getServerStatus } from "../../lib/mc-status";
 import { getServer } from "../../lib/servers";
+import { isCloverGuild } from "../../config";
 
 /**
  * Job (6 min — Discord limite les renommages à 2 par 10 min et par salon) :
@@ -14,6 +15,7 @@ import { getServer } from "../../lib/servers";
  */
 export async function tickMcCounter(client: CloverClient): Promise<void> {
   for (const guild of client.guilds.cache.values()) {
+    if (!isCloverGuild(guild.id)) continue;
     const cfg = await getGuildConfig(guild.id);
 
     if (cfg.counterChannelId) {

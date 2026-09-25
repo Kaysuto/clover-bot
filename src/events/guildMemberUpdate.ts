@@ -1,5 +1,6 @@
 import { logger } from "../lib/logger";
 import { handleBoost } from "../modules/boost/manager";
+import { handlePropulseurChange } from "../modules/boost/propulseur";
 import { logMemberUpdate } from "../modules/logs/members";
 import type { EventHandler } from "../types";
 
@@ -11,6 +12,9 @@ const guildMemberUpdate: EventHandler<"guildMemberUpdate"> = {
     );
     await handleBoost(oldMember, newMember).catch((err) =>
       logger.error({ err, memberId: newMember.id }, "Récompense de boost impossible"),
+    );
+    await handlePropulseurChange(oldMember, newMember).catch((err) =>
+      logger.error({ err, memberId: newMember.id }, "Grade Propulseur non mis à jour"),
     );
   },
 };

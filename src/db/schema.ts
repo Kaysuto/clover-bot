@@ -14,6 +14,19 @@ import {
 
 // ─── Configuration par guilde ────────────────────────────────────────────────
 
+export const botGuildInstallations = pgTable("bot_guild_installations", {
+  guildId: text("guild_id").primaryKey(),
+  guildName: text("guild_name").notNull(),
+  ownerId: text("owner_id"),
+  installedAt: timestamp("installed_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  removedAt: timestamp("removed_at", { withTimezone: true }),
+});
+
 export const botDashboardDaily = pgTable("bot_dashboard_daily", {
   guildId: text("guild_id").notNull(),
   day: text("day").notNull(),

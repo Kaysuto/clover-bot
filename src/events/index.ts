@@ -5,6 +5,8 @@ import channelDelete from "./channelDelete";
 import channelUpdate from "./channelUpdate";
 import guildBanAdd from "./guildBanAdd";
 import guildBanRemove from "./guildBanRemove";
+import guildCreate from "./guildCreate";
+import guildDelete from "./guildDelete";
 import guildMemberAdd from "./guildMemberAdd";
 import guildMemberRemove from "./guildMemberRemove";
 import guildMemberUpdate from "./guildMemberUpdate";
@@ -30,6 +32,8 @@ export const events: EventHandler[] = [
   userUpdate,
   guildBanAdd,
   guildBanRemove,
+  guildCreate,
+  guildDelete,
   channelCreate,
   channelDelete,
   channelUpdate,

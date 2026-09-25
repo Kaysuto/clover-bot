@@ -5,6 +5,7 @@ import { getGuildConfig, type GuildConfig } from "../../db/guild-config";
 import { botMinecraftLinks } from "../../db/schema";
 import { usersMeta } from "../../db/site-schema";
 import { logger } from "../../lib/logger";
+import { isCloverGuild } from "../../config";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -107,6 +108,7 @@ export async function syncMember(
   cfg?: GuildConfig,
   linked?: LinkedAccount | null,
 ): Promise<{ status: SyncStatus; username?: string }> {
+  if (!isCloverGuild(member.guild.id)) return { status: "not-linked" };
   cfg ??= await getGuildConfig(member.guild.id);
   linked ??= await getLinkedAccount(member.id);
 
@@ -156,6 +158,7 @@ export async function syncMember(
 export async function syncGuild(
   guild: Guild,
 ): Promise<{ synced: number; partial: number; unlinked: number }> {
+  if (!isCloverGuild(guild.id)) return { synced: 0, partial: 0, unlinked: 0 };
   const cfg = await getGuildConfig(guild.id);
 
   // Précharge tous les liens en 2 requêtes (site prime sur code)

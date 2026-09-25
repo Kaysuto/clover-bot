@@ -7,6 +7,7 @@ import { botVotes } from "../../db/schema";
 import { brandEmbed } from "../../lib/embeds";
 import { logger } from "../../lib/logger";
 import { rconBroadcast } from "../../lib/rcon";
+import { isCloverGuild } from "../../config";
 import { getDiscordIdByPlayer } from "../sync/manager";
 
 export type VoteRow = typeof botVotes.$inferSelect;
@@ -34,9 +35,9 @@ const DEDUP_WINDOW_MS = 10 * 60_000;
 /** Guilde de référence : celle où le membre se trouve, sinon la seule connue. */
 function resolveGuild(client: CloverClient, discordId: string | null): Guild | null {
   const owning = discordId
-    ? client.guilds.cache.find((g) => g.members.cache.has(discordId))
+    ? client.guilds.cache.find((g) => isCloverGuild(g.id) && g.members.cache.has(discordId))
     : undefined;
-  return owning ?? client.guilds.cache.first() ?? null;
+  return owning ?? client.guilds.cache.find((g) => isCloverGuild(g.id)) ?? null;
 }
 
 /**
@@ -225,6 +226,7 @@ export async function tickVoteRoles(client: CloverClient): Promise<void> {
     if (pending) continue;
 
     for (const guild of client.guilds.cache.values()) {
+      if (!isCloverGuild(guild.id)) continue;
       const cfg = await getGuildConfig(guild.id);
       if (!cfg.voteRoleId) continue;
       const member = await guild.members.fetch(vote.discordId).catch(() => null);

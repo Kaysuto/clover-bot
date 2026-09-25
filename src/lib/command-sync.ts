@@ -1,8 +1,8 @@
 import { Routes } from "discord.js";
 import type { APIApplicationCommand, RESTPostAPIApplicationCommandsJSONBody } from "discord.js";
 import type { CloverClient } from "../client";
-import { commands } from "../commands";
-import { env } from "../config";
+import { cloverCommands, commands, publicCommands } from "../commands";
+import { cloverGuildIds, env } from "../config";
 import { logger } from "./logger";
 
 /**
@@ -14,16 +14,43 @@ import { logger } from "./logger";
  * Strictement limité aux commandes **de guilde** : l'application publie aussi des
  * commandes globales (intégration Minecraft), qu'un PUT sans `guildId` effacerait.
  */
-export async function syncGuildCommands(client: CloverClient): Promise<void> {
-  const desired = commands.map((c) => c.data.toJSON());
-  const route = Routes.applicationGuildCommands(
-    client.application?.id ?? env.DISCORD_CLIENT_ID,
-    env.DISCORD_GUILD_ID,
-  );
+export async function syncApplicationCommands(client: CloverClient): Promise<void> {
+  const applicationId = client.application?.id ?? env.DISCORD_CLIENT_ID;
+  if (env.DEV_GUILD_ID) {
+    await syncRoute(
+      client,
+      Routes.applicationGuildCommands(applicationId, env.DEV_GUILD_ID),
+      commands.map((command) => command.data.toJSON()),
+      "la guilde de développement",
+    );
+    return;
+  }
 
+  await syncRoute(
+    client,
+    Routes.applicationCommands(applicationId),
+    publicCommands.map((command) => command.data.toJSON()),
+    "toutes les guildes",
+  );
+  for (const guildId of cloverGuildIds) {
+    await syncRoute(
+      client,
+      Routes.applicationGuildCommands(applicationId, guildId),
+      cloverCommands.map((command) => command.data.toJSON()),
+      `la guilde Clover ${guildId}`,
+    );
+  }
+}
+
+async function syncRoute(
+  client: CloverClient,
+  route: `/${string}`,
+  desired: RESTPostAPIApplicationCommandsJSONBody[],
+  target: string,
+): Promise<void> {
   const current = (await client.rest.get(route)) as APIApplicationCommand[];
   if (upToDate(current, desired)) {
-    logger.debug({ count: desired.length }, "Slash commands déjà à jour");
+    logger.debug({ count: desired.length, target }, "Slash commands déjà à jour");
     return;
   }
 
@@ -32,8 +59,8 @@ export async function syncGuildCommands(client: CloverClient): Promise<void> {
     .map((c) => c.name)
     .filter((name) => !current.some((c) => c.name === name));
   logger.info(
-    { count: desired.length, added },
-    "Slash commands publiées sur la guilde",
+    { count: desired.length, added, target },
+    "Slash commands publiées",
   );
 }
 

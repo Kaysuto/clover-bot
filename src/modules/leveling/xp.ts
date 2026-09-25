@@ -6,6 +6,7 @@ import { botLevels } from "../../db/schema";
 import { brandEmbed } from "../../lib/embeds";
 import { logger } from "../../lib/logger";
 import { rconBroadcast } from "../../lib/rcon";
+import { isCloverGuild } from "../../config";
 import { getLinkedAccount } from "../sync/manager";
 import { levelFromXp } from "./formula";
 import { applyLevelRoles } from "./rewards";
@@ -157,12 +158,12 @@ async function announceLevelUp(
   if (!granted.length) return;
 
   // Récompense in-game : une seule résolution du compte lié pour tous les grades.
-  const rewards = granted.filter((g) => g.rconCommand);
+  const rewards = isCloverGuild(guild.id) ? granted.filter((g) => g.rconCommand) : [];
   const linked = rewards.length ? await getLinkedAccount(userId).catch(() => null) : null;
 
   for (const { role, level, rconCommand } of granted) {
     let extra = "";
-    if (rconCommand && linked) {
+    if (rconCommand && linked && isCloverGuild(guild.id)) {
       const done = await rconBroadcast(
         rconCommand.replaceAll("{player}", linked.minecraftUsername),
       ).catch((err) => {
@@ -170,7 +171,7 @@ async function announceLevelUp(
         return [] as string[];
       });
       if (done.length) extra = `\n🎁 Récompense envoyée en jeu à \`${linked.minecraftUsername}\`.`;
-    } else if (rconCommand && !linked) {
+    } else if (rconCommand && !linked && isCloverGuild(guild.id)) {
       extra = "\n🎁 Une récompense en jeu t'attend : lie ton compte avec `/lier`.";
     }
     await sendDm(

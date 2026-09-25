@@ -5,7 +5,7 @@ import { logger } from "./logger";
 
 /**
  * Lecture SEULE des groupes LuckPerms, pour refléter les grades en jeu sur des
- * rôles Discord. Connexion distincte de `mc-db.ts` et pilotée par ses propres
+ * rôles Discord et réconcilier le grade Propulseur (écrit, lui, par RCON). Connexion distincte de `mc-db.ts` et pilotée par ses propres
  * variables `LUCKPERMS_DB_*` : la base du plugin clover-core est hors périmètre,
  * et LuckPerms vit le plus souvent ailleurs. Non configuré = fonction inactive.
  */
@@ -73,6 +73,28 @@ export async function getPlayerGroups(uuid: string): Promise<PlayerGroups | null
     return { primaryGroup: primaryGroup.toLowerCase(), groups: [...groups] };
   } catch (err) {
     logger.warn({ err, uuid }, "Lecture des groupes LuckPerms impossible");
+    return null;
+  }
+}
+
+/**
+ * UUID des joueurs qui héritent directement d'un groupe, tous contextes
+ * confondus. Null si la fonction est inactive ou la base injoignable : un
+ * appelant qui retire des grades ne doit jamais prendre une erreur pour une
+ * liste vide.
+ */
+export async function getGroupHolders(group: string): Promise<string[] | null> {
+  if (!luckPermsConfigured) return null;
+
+  try {
+    const [rows] = await getPool().query<RowDataPacket[]>(
+      `SELECT DISTINCT uuid FROM ${PERMISSIONS_TABLE}
+       WHERE permission = ? AND value = 1 AND (expiry = 0 OR expiry > ?)`,
+      [`group.${group.toLowerCase()}`, Math.floor(Date.now() / 1_000)],
+    );
+    return rows.map((row) => String(row.uuid));
+  } catch (err) {
+    logger.warn({ err, group }, "Lecture des membres d'un groupe LuckPerms impossible");
     return null;
   }
 }

@@ -1,4 +1,5 @@
-import { syncGuildCommands } from "../lib/command-sync";
+import { syncApplicationCommands } from "../lib/command-sync";
+import { recordGuildInstallation } from "../db/guild-installations";
 import { createDashboardRoute } from "../modules/dashboard/route";
 import { sampleMembers } from "../modules/dashboard/statistics";
 import { touchHeartbeat } from "../lib/heartbeat";
@@ -20,6 +21,7 @@ import { pruneXpCooldowns } from "../modules/leveling/xp";
 import { tickMcCounter } from "../modules/mc-counter/job";
 import { tickMemberCounter } from "../modules/member-counter/job";
 import { tickSanctions } from "../modules/moderation/sanctions";
+import { tickPropulseurSync } from "../modules/boost/propulseur";
 import { tickRankSync } from "../modules/ranks/sync";
 import { tickStatus } from "../modules/status/monitor";
 import { tickSiteLinksDelta } from "../modules/sync/delta";
@@ -42,12 +44,15 @@ const ready: EventHandler<"clientReady"> = {
     );
 
     // Une commande ajoutée au code doit exister sur Discord sans étape manuelle.
-    await syncGuildCommands(client).catch((err) =>
+    await syncApplicationCommands(client).catch((err) =>
       logger.error({ err }, "Publication des slash commands impossible"),
     );
 
     // Remise en cohérence après redémarrage
     for (const guild of client.guilds.cache.values()) {
+      await recordGuildInstallation(guild).catch((err) =>
+        logger.error({ err, guildId: guild.id }, "Cycle d’installation impossible à enregistrer"),
+      );
       await syncGuildInvites(guild).catch((err) =>
         logger.error({ err, guildId: guild.id }, "Sync des invitations impossible"),
       );
@@ -112,6 +117,12 @@ const ready: EventHandler<"clientReady"> = {
       name: "ranks-sync",
       intervalMs: 6 * 3_600_000, // grades LuckPerms → rôles Discord
       run: () => tickRankSync(client),
+      runOnStart: true,
+    });
+    registerJob({
+      name: "propulseur-sync",
+      intervalMs: 30 * 60_000, // boosters Discord → groupe LuckPerms propulseur
+      run: () => tickPropulseurSync(client),
       runOnStart: true,
     });
     registerJob({
