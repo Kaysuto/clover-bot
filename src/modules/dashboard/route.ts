@@ -61,6 +61,18 @@ export function createDashboardRoute(client: CloverClient): IngressRoute {
     headerOnly: "x-dashboard-token",
     async handle({ payload }) {
       try {
+        // Seule opération hors guilde : parmi les serveurs que l'utilisateur
+        // gère, ceux où le bot est présent (sélecteur « Mes serveurs »). La
+        // table des installations vit dans la base du bot, que le dashboard
+        // ne lit pas.
+        if (payload.operation === "installations") {
+          const ids = z.array(snowflake).max(200).parse(payload.guildIds);
+          return {
+            status: 200,
+            message: "OK",
+            data: { installed: ids.filter((id) => client.guilds.cache.has(id)) },
+          };
+        }
         const envelope = adminEnvelope.parse(payload);
         const { operation, guildId, actorId } = envelope;
         const guild = client.guilds.cache.get(guildId);
