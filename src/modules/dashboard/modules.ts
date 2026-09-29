@@ -9,8 +9,41 @@ export const MODULE_IDS = [
   "departure",
   "invites",
   "events",
+  "antiraid",
+  "antinuke",
+  "antispam",
+  "antiwebhook",
+  "quarantaine",
+  "antiphishing",
+  "verification",
+  "nsfw",
+  "surveillance",
 ] as const;
 export type DashboardModule = (typeof MODULE_IDS)[number];
+/**
+ * Protections critiques : seuls le propriétaire et le rôle de sécurité peuvent
+ * les couper (cf. `hasSecurityAuthority`). Les rallumer reste ouvert à qui
+ * gère le serveur.
+ */
+export const PROTECTED_MODULES: ReadonlySet<DashboardModule> = new Set([
+  "antiraid",
+  "antinuke",
+  "antispam",
+  "antiwebhook",
+  "quarantaine",
+]);
+/** Libellés des modules de sécurité, pour `/securite`. */
+export const SECURITY_MODULE_LABELS: Partial<Record<DashboardModule, string>> = {
+  antiraid: "Anti-raid",
+  antinuke: "Anti-nuke",
+  antispam: "Anti-spam",
+  antiwebhook: "Anti-webhook",
+  quarantaine: "Quarantaine des bots",
+  antiphishing: "Anti-phishing",
+  verification: "Vérification",
+  nsfw: "Filtre NSFW",
+  surveillance: "Surveillance du staff et anti-usurpation",
+};
 export async function moduleEnabled(guildId: string, id: DashboardModule) {
   return !(await getGuildConfig(guildId)).disabledModules.includes(id);
 }

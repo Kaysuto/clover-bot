@@ -5,7 +5,7 @@ import { isCloverGuild, luckPermsConfigured } from "../../config";
 import { db } from "../../db";
 import { getGuildConfig } from "../../db/guild-config";
 import { botRankRoles } from "../../db/schema";
-import { dashedUuid, getPlayerGroups } from "../../lib/lp-db";
+import { dashedUuid, getGroupNames, getPlayerGroups } from "../../lib/lp-db";
 import { logger } from "../../lib/logger";
 import { getLinkedAccount } from "../sync/manager";
 
@@ -27,7 +27,9 @@ export interface RankSyncResult {
  * rôles des groupes qu'il possède, retire ceux des groupes qu'il a perdus.
  *
  * Seuls les rôles déclarés dans `bot_rank_roles` sont touchés — un rôle donné
- * à la main hors de cette table n'est jamais retiré.
+ * à la main hors de cette table n'est jamais retiré. Une association vers un
+ * groupe absent de LuckPerms (renommé, supprimé, faute de frappe) est ignorée :
+ * sinon le rôle serait retiré à tout le monde.
  */
 export async function syncMemberRanks(
   member: GuildMember,
@@ -47,15 +49,18 @@ export async function syncMemberRanks(
   if (!linked) return { status: "not-linked", ...empty };
   if (!linked.minecraftUuid) return { status: "no-uuid", ...empty };
 
-  const lp = await getPlayerGroups(dashedUuid(linked.minecraftUuid));
-  if (!lp) return { status: "unavailable", ...empty };
+  const [lp, knownGroups] = await Promise.all([
+    getPlayerGroups(dashedUuid(linked.minecraftUuid)),
+    getGroupNames(),
+  ]);
+  if (!lp || !knownGroups) return { status: "unavailable", ...empty };
 
   const added: string[] = [];
   const removed: string[] = [];
 
   for (const row of rows) {
     const role = member.guild.roles.cache.get(row.roleId);
-    if (!role) continue;
+    if (!role || !knownGroups.has(row.lpGroup.toLowerCase())) continue;
     const shouldHave = lp.groups.includes(row.lpGroup.toLowerCase());
     const has = member.roles.cache.has(role.id);
 

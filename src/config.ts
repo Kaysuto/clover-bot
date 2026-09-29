@@ -67,6 +67,22 @@ const envSchema = z.object({
   SITE_API_URL: optionalString,
   SITE_API_TOKEN: optionalString,
 
+  // Sécurité (cf. modules/security)
+  /** Clé AES-256 (64 caractères hexadécimaux) chiffrant les secrets des webhooks sortants. */
+  SECURITY_WEBHOOK_KEY: optionalString,
+  /** Liste publique de domaines d'hameçonnage (JSON `{ domains: [] }` ou tableau). */
+  PHISHING_FEED_URL: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z
+      .string()
+      .url()
+      .default(
+        "https://raw.githubusercontent.com/nikolaischunk/discord-phishing-links/main/domain-list.json",
+      ),
+  ),
+  /** Modèle ONNX de détection NSFW ; absent, seul le texte est filtré. */
+  NSFW_MODEL_PATH: optionalString,
+
   LOG_LEVEL: z.string().default("info"),
   NODE_ENV: z.enum(["development", "production"]).default("development"),
 });

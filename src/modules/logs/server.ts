@@ -45,7 +45,7 @@ export async function logChannelCreate(
 
   await sendLog(
     channel.guild,
-    "serveur",
+    "salons",
     logEmbed(LOG_COLOR.add, "📁 Salon créé").setDescription(
       `${channel} · \`${channel.name}\` (${typeLabel(channel)})${auditFooter(entry)}`,
     ),
@@ -64,7 +64,7 @@ export async function logChannelDelete(
 
   await sendLog(
     channel.guild,
-    "serveur",
+    "salons",
     logEmbed(LOG_COLOR.remove, "🗑️ Salon supprimé").setDescription(
       `\`${channel.name}\` (${typeLabel(channel)})${auditFooter(entry)}`,
     ),
@@ -117,7 +117,7 @@ export async function logChannelUpdate(
 
   await sendLog(
     newChannel.guild,
-    "serveur",
+    "salons",
     logEmbed(LOG_COLOR.update, "✏️ Salon modifié").setDescription(
       trim(`${newChannel}\n${changes.join("\n")}${auditFooter(entry)}`, 4000),
     ),
@@ -128,7 +128,7 @@ export async function logRoleCreate(role: Role): Promise<void> {
   const entry = await findAuditEntry(role.guild, AuditLogEvent.RoleCreate, role.id);
   await sendLog(
     role.guild,
-    "serveur",
+    "roles",
     logEmbed(LOG_COLOR.add, "🎭 Rôle créé").setDescription(
       `${role} · \`${role.name}\`${auditFooter(entry)}`,
     ),
@@ -139,7 +139,7 @@ export async function logRoleDelete(role: Role): Promise<void> {
   const entry = await findAuditEntry(role.guild, AuditLogEvent.RoleDelete, role.id);
   await sendLog(
     role.guild,
-    "serveur",
+    "roles",
     logEmbed(LOG_COLOR.remove, "🗑️ Rôle supprimé").setDescription(
       `\`${role.name}\` (${role.members.size} membre(s))${auditFooter(entry)}`,
     ),
@@ -177,7 +177,7 @@ export async function logRoleUpdate(oldRole: Role, newRole: Role): Promise<void>
 
   await sendLog(
     newRole.guild,
-    "serveur",
+    "roles",
     logEmbed(LOG_COLOR.update, "✏️ Rôle modifié").setDescription(
       trim(`${newRole}\n${changes.join("\n")}${auditFooter(entry)}`, 4000),
     ),
@@ -195,7 +195,7 @@ export async function logInviteCreate(invite: Invite): Promise<void> {
 
   await sendLog(
     guild,
-    "serveur",
+    "invitations",
     logEmbed(LOG_COLOR.add, "🔗 Invitation créée").setDescription(
       `\`${invite.code}\`${invite.inviterId ? ` par <@${invite.inviterId}>` : ""}\n**Salon** <#${invite.channelId}>\n**Limites** ${limits}`,
     ),
@@ -208,7 +208,7 @@ export async function logInviteDelete(invite: Invite): Promise<void> {
 
   await sendLog(
     guild,
-    "serveur",
+    "invitations",
     logEmbed(LOG_COLOR.remove, "🔗 Invitation supprimée").setDescription(
       `\`${invite.code}\`${invite.inviterId ? ` de <@${invite.inviterId}>` : ""}`,
     ),

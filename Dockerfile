@@ -1,5 +1,5 @@
 # ── Build ────────────────────────────────────────────────────────
-FROM node:22-alpine AS builder
+FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -10,9 +10,15 @@ COPY src ./src
 RUN npm run build
 
 # ── Runtime ──────────────────────────────────────────────────────
-FROM node:22-alpine AS runtime
+FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+
+# Debian et non Alpine : onnxruntime-node (filtre NSFW) n'existe qu'en glibc.
+# Police : le captcha de vérification est un SVG rendu par sharp.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends fonts-dejavu-core \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev

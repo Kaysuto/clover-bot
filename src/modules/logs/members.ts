@@ -102,7 +102,7 @@ export async function logMemberUpdate(
   if (oldMember.nickname !== newMember.nickname) {
     await sendLog(
       guild,
-      "membres",
+      "profils",
       logEmbed(LOG_COLOR.update, "✏️ Pseudo serveur modifié")
         .setDescription(userLine(newMember.user))
         .addFields(
@@ -226,7 +226,7 @@ export async function logUserUpdate(
   // userUpdate est global : on ne journalise que dans les serveurs où il est membre.
   for (const guild of client.guilds.cache.values()) {
     if (!guild.members.cache.has(newUser.id)) continue;
-    for (const embed of embeds) await sendLog(guild, "membres", embed);
+    for (const embed of embeds) await sendLog(guild, "profils", embed);
   }
 }
 

@@ -4,6 +4,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   serial,
@@ -222,8 +223,239 @@ export const botGuildConfig = pgTable("bot_guild_config", {
    */
   raidQuarantineRoleId: text("raid_quarantine_role_id"),
 
+  // Sécurité (cf. modules/security)
+  /**
+   * Rôle de sécurité : ses porteurs peuvent couper les modules protégés. Seul
+   * le propriétaire peut le donner — un octroi par quelqu'un d'autre est annulé.
+   */
+  securityRoleId: text("security_role_id"),
+  /** Salon des incidents de sécurité ; à défaut, le log « sécurité ». */
+  securityAlertChannelId: text("security_alert_channel_id"),
+  /** Âge minimal des comptes pendant un verrouillage anti-raid, en jours (0 = règle permanente seule). */
+  raidLockdownMinAgeDays: integer("raid_lockdown_min_age_days").notNull().default(7),
+
+  // Anti-nuke : actions d'un même auteur dans la fenêtre avant sanction
+  nukeDeleteThreshold: integer("nuke_delete_threshold").notNull().default(3),
+  nukeBanThreshold: integer("nuke_ban_threshold").notNull().default(3),
+  nukeCreateThreshold: integer("nuke_create_threshold").notNull().default(6),
+  nukeWindowSec: integer("nuke_window_sec").notNull().default(10),
+  /** Recréer ce que l'auteur a supprimé une fois sanctionné. */
+  nukeRestore: boolean("nuke_restore").notNull().default(true),
+
+  // Sauvegardes
+  /** Intervalle des sauvegardes automatiques, en heures (0 = désactivées). */
+  backupIntervalHours: integer("backup_interval_hours").notNull().default(6),
+  /** Derniers messages conservés par salon textuel. */
+  backupMessagesPerChannel: integer("backup_messages_per_channel").notNull().default(25),
+  /** Sauvegardes automatiques conservées (les manuelles ne sont jamais purgées). */
+  backupRetention: integer("backup_retention").notNull().default(10),
+
+  // Anti-spam (contenu posté ; AutoMod reste la première barrière)
+  spamMaxMessages: integer("spam_max_messages").notNull().default(6),
+  spamWindowSec: integer("spam_window_sec").notNull().default(5),
+  spamMaxMentions: integer("spam_max_mentions").notNull().default(6),
+  spamMaxChars: integer("spam_max_chars").notNull().default(1800),
+  spamMaxLines: integer("spam_max_lines").notNull().default(30),
+  /** Comptes distincts postant le même texte avant d'y voir un raid coordonné. */
+  spamDuplicateAccounts: integer("spam_duplicate_accounts").notNull().default(3),
+  spamTimeoutMinutes: integer("spam_timeout_minutes").notNull().default(10),
+  spamExemptChannelIds: text("spam_exempt_channel_ids")
+    .array()
+    .notNull()
+    .default(sql`'{}'::text[]`),
+
+  // Anti-phishing
+  phishingTimeoutMinutes: integer("phishing_timeout_minutes").notNull().default(60),
+  /** Domaines autorisés en plus de la liste blanche du code. */
+  phishingAllowDomains: text("phishing_allow_domains")
+    .array()
+    .notNull()
+    .default(sql`'{}'::text[]`),
+
+  // Vérification des arrivants
+  verifyRoleId: text("verify_role_id"),
+  verifyChannelId: text("verify_channel_id"),
+  verifyMessageId: text("verify_message_id"),
+  /** bouton | captcha */
+  verifyMode: text("verify_mode").notNull().default("bouton"),
+  /** off | preparing (rôle donné aux membres présents) | active */
+  verifyState: text("verify_state").notNull().default("off"),
+  /**
+   * Début de l'activation : les membres arrivés avant reçoivent le rôle
+   * d'office, ceux arrivés après doivent se vérifier.
+   */
+  verifyActivatedAt: timestamp("verify_activated_at", { withTimezone: true }),
+  /** Expulsion des non-vérifiés après ce délai, en minutes (0 = jamais). */
+  verifyKickMinutes: integer("verify_kick_minutes").notNull().default(0),
+
+  // Filtre NSFW
+  /** Score (0-100) au-delà duquel une image est supprimée. */
+  nsfwThreshold: integer("nsfw_threshold").notNull().default(80),
+  nsfwImages: boolean("nsfw_images").notNull().default(true),
+
+  // Surveillance du staff et anti-usurpation
+  staffMinAccountAgeDays: integer("staff_min_account_age_days").notNull().default(30),
+  staffMinMemberDays: integer("staff_min_member_days").notNull().default(7),
+  /** Mettre en quarantaine (rôle anti-raid) un usurpateur, en plus de l'alerte. */
+  impersonationQuarantine: boolean("impersonation_quarantine").notNull().default(false),
+
+  // Réseau multi-serveurs
+  /** Salon recevant incidents et bannissements des autres serveurs du réseau. */
+  networkLogChannelId: text("network_log_channel_id"),
+
+  // Webhook sortant
+  outboundWebhookUrl: text("outbound_webhook_url"),
+  /** Secret HMAC chiffré (AES-256-GCM, clé `SECURITY_WEBHOOK_KEY`). */
+  outboundWebhookSecret: text("outbound_webhook_secret"),
+
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ─── Sécurité ────────────────────────────────────────────────────────────────
+
+/**
+ * Comptes de confiance (membres ou bots) : les protections ne les sanctionnent
+ * pas. Le propriétaire et les porteurs du rôle de sécurité le sont d'office.
+ */
+export const botSecurityTrusted = pgTable(
+  "bot_security_trusted",
+  {
+    guildId: text("guild_id").notNull(),
+    userId: text("user_id").notNull(),
+    addedBy: text("added_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.guildId, t.userId] })],
+);
+
+/**
+ * Incident détecté par une protection. `restore` garde ce qu'il faut pour
+ * annuler la mesure (rôles retirés, permissions d'origine…) : toute sanction
+ * automatique doit rester réversible.
+ */
+export const botSecurityIncidents = pgTable(
+  "bot_security_incidents",
+  {
+    id: serial("id").primaryKey(),
+    guildId: text("guild_id").notNull(),
+    type: text("type").notNull(),
+    actorId: text("actor_id"),
+    targetId: text("target_id"),
+    summary: text("summary").notNull(),
+    measures: text("measures").array().notNull().default(sql`'{}'::text[]`),
+    restore: jsonb("restore"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: text("resolved_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("bot_security_incidents_guild_idx").on(t.guildId, t.createdAt)],
+);
+
+/**
+ * Sauvegarde de la structure (rôles, salons, permissions) et des derniers
+ * messages ; `data` et `messages` suivent les types de `modules/security/snapshot.ts`.
+ */
+export const botBackups = pgTable(
+  "bot_backups",
+  {
+    id: serial("id").primaryKey(),
+    guildId: text("guild_id").notNull(),
+    kind: text("kind").notNull(), // auto | manuel
+    createdBy: text("created_by"),
+    label: text("label"),
+    data: jsonb("data").notNull(),
+    messages: jsonb("messages").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("bot_backups_guild_idx").on(t.guildId, t.createdAt)],
+);
+
+/**
+ * Restauration en cours. `idMap` (ancien → nouvel identifiant) est réécrit
+ * après chaque création : une reprise après redémarrage ne recrée rien deux fois.
+ */
+export const botRestoreJobs = pgTable("bot_restore_jobs", {
+  id: serial("id").primaryKey(),
+  guildId: text("guild_id").notNull(),
+  backupId: integer("backup_id").notNull(),
+  requestedBy: text("requested_by").notNull(),
+  status: text("status").notNull().default("running"), // running | done | failed
+  idMap: jsonb("id_map").notNull().default(sql`'{}'::jsonb`),
+  error: text("error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+});
+
+/** Bot arrivé sans permission, en attente de la décision du propriétaire. */
+export const botBotQuarantine = pgTable(
+  "bot_bot_quarantine",
+  {
+    guildId: text("guild_id").notNull(),
+    botId: text("bot_id").notNull(),
+    roleId: text("role_id"),
+    /** Permissions d'origine du rôle d'intégration (bitfield en texte). */
+    permissions: text("permissions").notNull().default("0"),
+    addedBy: text("added_by"),
+    status: text("status").notNull().default("pending"), // pending | approved | kicked
+    decidedBy: text("decided_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.guildId, t.botId] })],
+);
+
+/** Arrivant à vérifier : captcha en cours et échéance d'expulsion. */
+export const botVerifications = pgTable(
+  "bot_verifications",
+  {
+    guildId: text("guild_id").notNull(),
+    userId: text("user_id").notNull(),
+    code: text("code"),
+    attempts: integer("attempts").notNull().default(0),
+    /** Échéance d'expulsion (null = aucune). */
+    kickAt: timestamp("kick_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.guildId, t.userId] })],
+);
+
+/** Livraison au webhook sortant, rejouée par le job jusqu'au succès. */
+export const botWebhookDeliveries = pgTable(
+  "bot_webhook_deliveries",
+  {
+    id: serial("id").primaryKey(),
+    guildId: text("guild_id").notNull(),
+    event: text("event").notNull(),
+    payload: jsonb("payload").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("bot_webhook_deliveries_due_idx").on(t.deliveredAt, t.nextAttemptAt)],
+);
+
+// ─── Réseau multi-serveurs ───────────────────────────────────────────────────
+
+export const botNetworks = pgTable("bot_networks", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  /** Seul à inviter des serveurs : le propriétaire de la guilde fondatrice. */
+  ownerId: text("owner_id").notNull(),
+  /** Code d'adhésion courant (null = aucune invitation ouverte). */
+  joinCode: text("join_code"),
+  joinCodeExpiresAt: timestamp("join_code_expires_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Une guilde appartient à un réseau au plus. */
+export const botNetworkGuilds = pgTable("bot_network_guilds", {
+  guildId: text("guild_id").primaryKey(),
+  networkId: integer("network_id").notNull(),
+  /** Appliquer ici les bannissements des autres serveurs, et partager les siens. */
+  shareBans: boolean("share_bans").notNull().default(true),
+  joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 // ─── Niveaux ─────────────────────────────────────────────────────────────────
@@ -268,7 +500,7 @@ export const botLogSettings = pgTable(
   "bot_log_settings",
   {
     guildId: text("guild_id").notNull(),
-    category: text("category").notNull(), // membres | moderation | vocal | serveur | automod
+    category: text("category").notNull(), // clé de LOG_CATEGORIES (modules/logs/channel.ts)
     channelId: text("channel_id"), // null = salon de logs par défaut
     enabled: boolean("enabled").notNull().default(true),
   },
@@ -445,6 +677,23 @@ export const botTickets = pgTable(
     closedAt: timestamp("closed_at"),
   },
   (t) => [index("bot_tickets_opener_idx").on(t.guildId, t.openerId, t.status)],
+);
+
+/**
+ * Note interne du staff sur un ticket : jamais publiée dans le salon (l'auteur
+ * du ticket la verrait), seulement consultable par `/ticket notes` et jointe
+ * au récapitulatif d'archive.
+ */
+export const botTicketNotes = pgTable(
+  "bot_ticket_notes",
+  {
+    id: serial("id").primaryKey(),
+    ticketId: integer("ticket_id").notNull(),
+    authorId: text("author_id").notNull(),
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("bot_ticket_notes_ticket_idx").on(t.ticketId)],
 );
 
 // ─── Retours de départ ───────────────────────────────────────────────────────

@@ -7,6 +7,8 @@ import giveaway from "./giveaways/giveaway";
 import invites from "./invites/invites";
 import classement from "./leveling/classement";
 import rank from "./leveling/rank";
+import sauvegarde from "./security/sauvegarde";
+import securite from "./security/securite";
 import casier from "./moderation/casier";
 import clear from "./moderation/clear";
 import boutique from "./shop/boutique";
@@ -41,6 +43,8 @@ export const commands: Command[] = [
   votes,
   suggestion,
   boutique,
+  securite,
+  sauvegarde,
 ];
 
 const CLOVER_COMMAND_NAMES = new Set([

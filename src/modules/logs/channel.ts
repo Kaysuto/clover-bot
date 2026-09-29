@@ -11,8 +11,16 @@ export const LOG_CATEGORIES = {
   membres: "Membres",
   moderation: "Modération",
   vocal: "Vocal",
+  messages: "Messages",
+  salons: "Salons et fils",
+  roles: "Rôles",
   serveur: "Serveur",
+  invitations: "Invitations",
+  profils: "Profils",
+  emojis: "Émojis et stickers",
+  integrations: "Webhooks et intégrations",
   automod: "AutoMod",
+  securite: "Sécurité",
 } as const;
 
 export type LogCategory = keyof typeof LOG_CATEGORIES;

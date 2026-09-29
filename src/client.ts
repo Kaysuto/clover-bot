@@ -12,14 +12,19 @@ export class CloverClient extends Client {
 
   constructor() {
     super({
-      // MessageContent volontairement absent : l'XP n'a besoin que de
-      // l'auteur et du salon, messageCreate s'émet sans cet intent.
       intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildMessages,
+        // Privilégié : contenu, pièces jointes et embeds des messages, sans
+        // lesquels anti-phishing, filtre NSFW, anti-spam de contenu et
+        // sauvegarde des messages sont aveugles.
+        GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildVoiceStates,
         GatewayIntentBits.GuildInvites,
+        // Création de webhooks (anti-webhook) et émojis/stickers (logs).
+        GatewayIntentBits.GuildWebhooks,
+        GatewayIntentBits.GuildExpressions,
         // Bannissements/débannissements pour les logs (intent non privilégié).
         GatewayIntentBits.GuildModeration,
         // Déclenchements des règles AutoMod, pour les logs (intent non privilégié).

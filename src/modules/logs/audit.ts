@@ -25,7 +25,9 @@ export async function findAuditEntry<T extends AuditLogEvent>(
 
   if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
 
-  const logs = await guild.fetchAuditLogs({ type, limit: 5 }).catch(() => null);
+  // 50 entrées : une rafale scriptée (dix salons supprimés d'un coup) pousse
+  // l'entrée cherchée hors d'une fenêtre plus courte, et l'anti-nuke perdrait l'auteur.
+  const logs = await guild.fetchAuditLogs({ type, limit: 50 }).catch(() => null);
   if (!logs) return null;
 
   for (const entry of logs.entries.values()) {

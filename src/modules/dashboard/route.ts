@@ -34,7 +34,8 @@ import {
   LOG_CATEGORY_KEYS,
   type LogCategory,
 } from "../logs/channel";
-import { MODULE_IDS, moduleEnabled } from "./modules";
+import { MODULE_IDS, PROTECTED_MODULES, moduleEnabled } from "./modules";
+import { hasSecurityAuthority } from "../security/trust";
 import { configPatch, adminEnvelope, period, snowflake } from "./validation";
 import { recordAudit } from "./statistics";
 import { economyRequest } from "./economy-request";
@@ -253,6 +254,15 @@ export function createDashboardRoute(client: CloverClient): IngressRoute {
             .parse(payload);
           if (input.id === "economy" && !isCloverGuild(guildId))
             throw new Refusal(404, "Cette intégration n’est pas disponible sur ce serveur.");
+          if (
+            !input.enabled &&
+            PROTECTED_MODULES.has(input.id) &&
+            !(await hasSecurityAuthority(guild, actorId))
+          )
+            throw new Refusal(
+              403,
+              "Module protégé : seuls le propriétaire et le rôle de sécurité peuvent le couper.",
+            );
           const disabled = cfg.disabledModules.filter((id) => id !== input.id);
           if (!input.enabled) disabled.push(input.id);
           await updateGuildConfig(

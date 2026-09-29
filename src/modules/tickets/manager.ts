@@ -14,7 +14,7 @@ import {
   TextInputStyle,
 } from "discord.js";
 import { createTranscript } from "discord-html-transcripts";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import type { CloverClient } from "../../client";
 import { db } from "../../db";
 import {
@@ -22,7 +22,7 @@ import {
   type GuildConfig,
   invalidateGuildConfig,
 } from "../../db/guild-config";
-import { botGuildConfig, botTickets } from "../../db/schema";
+import { botGuildConfig, botTicketNotes, botTickets } from "../../db/schema";
 import { formatDuration } from "../../lib/duration";
 import { brandEmbed, errorEmbed, successEmbed } from "../../lib/embeds";
 import { buildId } from "../../lib/ids";
@@ -166,7 +166,7 @@ export async function getTicketByChannel(
   return row ?? null;
 }
 
-function isSupport(member: GuildMember, cfg: GuildConfig): boolean {
+export function isSupport(member: GuildMember, cfg: GuildConfig): boolean {
   return (
     member.permissions.has(PermissionFlagsBits.ManageGuild) ||
     (cfg.ticketSupportRoleId
@@ -187,6 +187,29 @@ export function canManageTicket(
   row: TicketRow,
 ): boolean {
   return row.openerId === member.id || isSupport(member, cfg);
+}
+
+export type TicketNote = typeof botTicketNotes.$inferSelect;
+
+/** Note interne : en base seulement, jamais dans le salon que l'auteur du ticket lit. */
+export async function addTicketNote(ticketId: number, authorId: string, content: string): Promise<void> {
+  await db.insert(botTicketNotes).values({ ticketId, authorId, content });
+}
+
+export async function listTicketNotes(ticketId: number): Promise<TicketNote[]> {
+  return db
+    .select()
+    .from(botTicketNotes)
+    .where(eq(botTicketNotes.ticketId, ticketId))
+    .orderBy(asc(botTicketNotes.id));
+}
+
+/** Notes en texte brut, jointes à l'archive (salon réservé au staff). */
+function notesFile(notes: TicketNote[], name: string) {
+  const body = notes
+    .map((n) => `[${n.createdAt.toISOString()}] ${n.authorId}\n${n.content}`)
+    .join("\n\n");
+  return { attachment: Buffer.from(body, "utf8"), name: `${name}-notes-internes.txt` };
 }
 
 /** Panneau publié par /ticket setup. */
@@ -610,7 +633,12 @@ export async function closeTicket(
     .setTimestamp();
 
   try {
-    await archive.send({ embeds: [recap], files: [transcript] });
+    const notes = await listTicketNotes(row.id);
+    if (notes.length) recap.addFields({ name: "Notes internes", value: `${notes.length} (fichier joint)`, inline: true });
+    await archive.send({
+      embeds: [recap],
+      files: notes.length ? [transcript, notesFile(notes, ticketName(row.ticketNumber))] : [transcript],
+    });
   } catch (err) {
     logger.error(
       { err, ticket: row.id },

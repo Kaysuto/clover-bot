@@ -21,8 +21,10 @@ import { db } from "../../db";
 import { getGuildConfig, updateGuildConfig } from "../../db/guild-config";
 import { botInviteTiers, botLevelRoles, botRankRoles } from "../../db/schema";
 import { brandEmbed, errorEmbed, successEmbed } from "../../lib/embeds";
+import { getGroupNames } from "../../lib/lp-db";
 import { getMcStatus } from "../../lib/mc-status";
 import { liftLockdown } from "../../modules/antiraid/manager";
+import { AUTHORITY_REFUSAL, hasSecurityAuthority } from "../../modules/security/trust";
 import {
   buildApplicationPanel,
   refreshApplicationPanels,
@@ -1002,6 +1004,20 @@ const config: Command = {
     const sub = interaction.options.getSubcommand(true);
     const guildId = interaction.guildId;
 
+    // Module protégé : ses réglages suffisent à le neutraliser (seuil à 0,
+    // levée du verrouillage), ils suivent donc la même règle que sa coupure.
+    if (
+      group === "antiraid" &&
+      sub !== "voir" &&
+      !(await hasSecurityAuthority(interaction.guild, interaction.user.id))
+    ) {
+      await interaction.reply({
+        embeds: [errorEmbed(AUTHORITY_REFUSAL)],
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
     switch (`${group}/${sub}`) {
       // ── Niveaux ──
       case "niveaux/message": {
@@ -1611,6 +1627,19 @@ const config: Command = {
       case "grades/lier": {
         const group = interaction.options.getString("groupe", true).toLowerCase();
         const role = interaction.options.getRole("role", true);
+        // Un groupe inconnu ferait retirer le rôle à tous ses porteurs.
+        const known = await getGroupNames();
+        if (known && !known.has(group)) {
+          await interaction.reply({
+            embeds: [
+              errorEmbed(
+                `Le groupe LuckPerms \`${group}\` n'existe pas. Groupes : ${[...known].map((g) => `\`${g}\``).join(", ")}.`,
+              ),
+            ],
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
         await db
           .insert(botRankRoles)
           .values({ guildId, lpGroup: group, roleId: role.id })

@@ -7,12 +7,15 @@ import {
   type TextChannel,
 } from "discord.js";
 import { getGuildConfig, updateGuildConfig } from "../../db/guild-config";
-import { errorEmbed, successEmbed } from "../../lib/embeds";
+import { brandEmbed, errorEmbed, successEmbed } from "../../lib/embeds";
 import {
+  addTicketNote,
   buildTicketPanel,
   canManageTicket,
   closeTicket,
   getTicketByChannel,
+  isSupport,
+  listTicketNotes,
 } from "../../modules/tickets/manager";
 import type { Command } from "../../types";
 
@@ -48,6 +51,15 @@ const ticket: Command = {
           o.setName("membre").setDescription("Membre à retirer").setRequired(true),
         ),
     )
+    .addSubcommand((s) =>
+      s
+        .setName("note")
+        .setDescription("Ajouter une note interne (invisible pour l'auteur du ticket)")
+        .addStringOption((o) =>
+          o.setName("texte").setDescription("Contenu de la note").setRequired(true).setMaxLength(1500),
+        ),
+    )
+    .addSubcommand((s) => s.setName("notes").setDescription("Lire les notes internes du ticket"))
     .addSubcommand((s) =>
       s
         .setName("close")
@@ -104,8 +116,34 @@ const ticket: Command = {
       return;
     }
 
-    // Même contrôle que les boutons du ticket : auteur, rôle support ou ManageGuild.
     const cfg = await getGuildConfig(interaction.guildId);
+
+    // Notes internes : staff seulement, l'auteur du ticket ne doit pas les lire.
+    if (sub === "note" || sub === "notes") {
+      if (!isSupport(interaction.member, cfg)) {
+        await interaction.editReply({ embeds: [errorEmbed("Les notes internes sont réservées au staff.")] });
+        return;
+      }
+      if (sub === "note") {
+        await addTicketNote(row.id, interaction.user.id, interaction.options.getString("texte", true));
+        await interaction.editReply({ embeds: [successEmbed("Note interne ajoutée.")] });
+        return;
+      }
+      const notes = await listTicketNotes(row.id);
+      const lines = notes.map(
+        (n) => `**<@${n.authorId}>** <t:${Math.floor(n.createdAt.getTime() / 1_000)}:R>\n${n.content}`,
+      );
+      await interaction.editReply({
+        embeds: [
+          brandEmbed()
+            .setTitle("🗒️ Notes internes")
+            .setDescription((lines.join("\n\n") || "*Aucune note.*").slice(0, 4_000)),
+        ],
+      });
+      return;
+    }
+
+    // Même contrôle que les boutons du ticket : auteur, rôle support ou ManageGuild.
     if (!canManageTicket(interaction.member, cfg, row)) {
       await interaction.editReply({
         embeds: [errorEmbed("Seuls l'auteur du ticket et le staff peuvent gérer ce ticket.")],

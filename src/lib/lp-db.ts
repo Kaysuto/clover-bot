@@ -32,6 +32,7 @@ const PREFIX = (env.LUCKPERMS_TABLE_PREFIX ?? "luckperms_").replace(
 );
 const PLAYERS_TABLE = `${PREFIX}players`;
 const PERMISSIONS_TABLE = `${PREFIX}user_permissions`;
+const GROUPS_TABLE = `${PREFIX}groups`;
 
 export interface PlayerGroups {
   primaryGroup: string;
@@ -95,6 +96,24 @@ export async function getGroupHolders(group: string): Promise<string[] | null> {
     return rows.map((row) => String(row.uuid));
   } catch (err) {
     logger.warn({ err, group }, "Lecture des membres d'un groupe LuckPerms impossible");
+    return null;
+  }
+}
+
+/**
+ * Noms des groupes LuckPerms existants, en minuscules. Null si la fonction est
+ * inactive ou la base injoignable.
+ */
+export async function getGroupNames(): Promise<Set<string> | null> {
+  if (!luckPermsConfigured) return null;
+
+  try {
+    const [rows] = await getPool().query<RowDataPacket[]>(
+      `SELECT name FROM ${GROUPS_TABLE}`,
+    );
+    return new Set(rows.map((row) => String(row.name).toLowerCase()));
+  } catch (err) {
+    logger.warn({ err }, "Lecture des groupes LuckPerms impossible");
     return null;
   }
 }

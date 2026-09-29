@@ -4,6 +4,7 @@ import { getGuildConfig, updateGuildConfig } from "../../db/guild-config";
 import { formatDuration } from "../../lib/duration";
 import { ERROR_COLOR, WARN_COLOR, brandEmbed } from "../../lib/embeds";
 import { logger } from "../../lib/logger";
+import { moduleEnabled } from "../dashboard/modules";
 import { sendLog } from "../logs/channel";
 
 /**
@@ -44,6 +45,7 @@ function burstDetected(guildId: string, threshold: number, windowSec: number): b
 export async function inspectJoin(member: GuildMember): Promise<boolean> {
   if (member.user.bot) return false;
   const guild = member.guild;
+  if (!(await moduleEnabled(guild.id, "antiraid"))) return false;
   const cfg = await getGuildConfig(guild.id);
 
   if (
@@ -56,12 +58,18 @@ export async function inspectJoin(member: GuildMember): Promise<boolean> {
     );
   }
 
-  if (cfg.raidMinAccountAgeDays <= 0) return false;
+  // Pendant un verrouillage (y compris celui que cette arrivée vient de
+  // déclencher), l'âge minimal est relevé : les comptes neufs restent dehors.
+  const current = await getGuildConfig(guild.id);
+  const minDays = Math.max(
+    current.raidMinAccountAgeDays,
+    current.raidUntil ? current.raidLockdownMinAgeDays : 0,
+  );
+  if (minDays <= 0) return false;
   const ageMs = Date.now() - member.user.createdTimestamp;
-  const minAgeMs = cfg.raidMinAccountAgeDays * 86_400_000;
-  if (ageMs >= minAgeMs) return false;
+  if (ageMs >= minDays * 86_400_000) return false;
 
-  return quarantine(member, ageMs, cfg.raidQuarantineRoleId, cfg.raidAlertChannelId);
+  return quarantine(member, ageMs, current.raidQuarantineRoleId, current.raidAlertChannelId);
 }
 
 /** Quarantaine du compte trop jeune, ou expulsion à défaut de rôle configuré. */

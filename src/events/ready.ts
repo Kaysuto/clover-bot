@@ -29,6 +29,15 @@ import { syncGuild } from "../modules/sync/manager";
 import { cleanupTempVoice } from "../modules/tempvoice/manager";
 import { reconcileTickets, refreshTicketPanels } from "../modules/tickets/manager";
 import { tickVoteRoles } from "../modules/vote/manager";
+import { pruneSpamState } from "../modules/security/antispam";
+import { pruneNukeState } from "../modules/security/antinuke";
+import { pruneWebhookState } from "../modules/security/antiwebhook";
+import { resumeRestores, tickBackups } from "../modules/security/backups";
+import { tickDeliveries } from "../modules/security/outbound";
+import { refreshPhishingList } from "../modules/security/phishing";
+import { pruneOffenses } from "../modules/security/sanctions";
+import { pruneImpersonationState } from "../modules/security/staff";
+import { tickVerification } from "../modules/security/verification";
 import { createVoteRoute } from "../modules/vote/route";
 import type { EventHandler } from "../types";
 
@@ -52,6 +61,12 @@ const ready: EventHandler<"clientReady"> = {
     for (const guild of client.guilds.cache.values()) {
       await recordGuildInstallation(guild).catch((err) =>
         logger.error({ err, guildId: guild.id }, "Cycle d’installation impossible à enregistrer"),
+      );
+      // Sans membres en cache, guildMemberUpdate/Remove ne se déclenchent pas
+      // (aucun partial) : le rôle de sécurité, la surveillance du staff et
+      // l'anti-nuke seraient aveugles jusqu'à la première sauvegarde.
+      await guild.members.fetch().catch((err) =>
+        logger.error({ err, guildId: guild.id }, "Chargement des membres impossible"),
       );
       await syncGuildInvites(guild).catch((err) =>
         logger.error({ err, guildId: guild.id }, "Sync des invitations impossible"),
@@ -162,6 +177,46 @@ const ready: EventHandler<"clientReady"> = {
       run: () => tickLockdown(client),
       runOnStart: true,
     });
+    // Sécurité : sauvegardes, vérification, webhooks sortants, liste anti-phishing.
+    registerJob({
+      name: "security-backups",
+      intervalMs: 15 * 60_000, // chaque guilde selon son intervalle (6 h par défaut)
+      run: () => tickBackups(client),
+      runOnStart: true,
+    });
+    registerJob({
+      name: "security-verification",
+      intervalMs: 30_000, // préparation par lots + expulsion des non-vérifiés échus
+      run: () => tickVerification(client),
+      runOnStart: true,
+    });
+    registerJob({
+      name: "security-webhooks",
+      intervalMs: 30_000,
+      run: tickDeliveries,
+      runOnStart: true,
+    });
+    registerJob({
+      name: "phishing-list",
+      intervalMs: 6 * 3_600_000,
+      run: refreshPhishingList,
+      runOnStart: true,
+    });
+    registerJob({
+      name: "security-prune",
+      intervalMs: 10 * 60_000, // fenêtres anti-spam/anti-nuke échues (mémoire)
+      run: async () => {
+        pruneSpamState();
+        pruneNukeState();
+        pruneWebhookState();
+        pruneOffenses();
+        pruneImpersonationState();
+      },
+    });
+    // Restaurations interrompues par un redémarrage : reprises en arrière-plan.
+    void resumeRestores(client).catch((err) =>
+      logger.error({ err }, "Reprise des restaurations impossible"),
+    );
     registerJob({
       name: "heartbeat",
       intervalMs: 30_000,
