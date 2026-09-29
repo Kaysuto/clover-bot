@@ -40,14 +40,8 @@ import { configPatch, adminEnvelope, period, snowflake } from "./validation";
 import { recordAudit } from "./statistics";
 import { economyRequest } from "./economy-request";
 import { targetRefusal } from "../moderation/target";
-class Refusal extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+import { Refusal } from "./refusal";
+import { securitySummary, securityWrite } from "./security";
 function permitted(member: GuildMember, permission: bigint) {
   if (!member.permissions.has(permission))
     throw new Refusal(403, "Permission Discord insuffisante.");
@@ -117,6 +111,8 @@ export function createDashboardRoute(client: CloverClient): IngressRoute {
             modules: available,
             config: safeConfig,
             logSettings: await getLogSettings(guildId),
+            // Une panne de la partie sécurité ne doit pas priver le dashboard du reste.
+            security: await securitySummary(guild, actorId).catch(() => null),
             capabilities: { clover: isCloverGuild(guildId) },
             revision: String(cfg.configVersion),
             stats: {
@@ -190,12 +186,15 @@ export function createDashboardRoute(client: CloverClient): IngressRoute {
           "logs.write": "Réglage des logs",
           "events.write": "Gestion de concours",
           "economy.write": "Opération économique",
+          "security.write": "Réglage de sécurité",
         };
         await recordAudit(
           guildId,
           actorId,
           labels[operation] ?? "Demande administrative",
         );
+        if (operation === "security.write")
+          return ok(await securityWrite(guild, actorId, payload));
         if (operation === "config.write") {
           permitted(member, PermissionFlagsBits.ManageGuild);
           const input = z
